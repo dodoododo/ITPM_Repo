@@ -1,21 +1,23 @@
 import { useState, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-// Import các Type chuẩn từ file index.ts của mày
+// Import các Type chuẩn từ file index.ts
 import { type Project, type Task, type User, type Department, type ProjectStatus } from '@/types';
-import KanbanBoard from '@/components/tasks/KanbanBoard.tsx';
+import KanbanBoard from '@/components/tasks/KanbanBoard'; // Đã sửa bỏ đuôi .tsx
 import ListView from '@/components/tasks/ListView';
 import GanttChart from '@/components/tasks/GanttChart';
 import CreateTaskModal from '@/components/tasks/CreateTaskModal';
 import InviteMembersModal from '@/components/projects/InviteMembersModal';
 import { Button } from '@/components/ui/button';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
-import { Plus, UserPlus, LayoutGrid, List, BarChart3, ArrowLeft, Loader2 } from 'lucide-react';
+import { 
+  Plus, UserPlus, LayoutGrid, List, BarChart3, 
+  ArrowLeft, Loader2, Settings, MoreHorizontal, CheckCircle2 
+} from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-// --- 1. Mock Data (Thay thế API base44) ---
+// --- 1. Mock Data ---
 const MOCK_PROJECT: Project = {
   id: 'p1',
   name: 'Hệ thống Quản lý ITPM',
@@ -41,16 +43,15 @@ const MOCK_USERS: User[] = [
   { id: 'u2', full_name: 'Nguyễn Văn A', email: 'vana@itpm.pro', avatar: '' },
 ];
 
-// Cấu hình trạng thái dự án
-const PROJECT_STATUS_CONFIG: Record<ProjectStatus, { label: string; color: string }> = {
-  planning: { label: 'Lập kế hoạch', color: 'bg-slate-100 text-slate-600' },
-  active: { label: 'Đang chạy', color: 'bg-blue-100 text-blue-600' },
-  completed: { label: 'Hoàn thành', color: 'bg-emerald-100 text-emerald-600' },
-  on_hold: { label: 'Tạm dừng', color: 'bg-amber-100 text-amber-600' },
+// Cấu hình trạng thái dự án chuẩn Base
+const PROJECT_STATUS_CONFIG: Record<ProjectStatus, { label: string; classes: string }> = {
+  planning: { label: 'Lập kế hoạch', classes: 'bg-slate-100 text-slate-600 border-slate-200' },
+  active: { label: 'Đang chạy', classes: 'bg-emerald-50 text-emerald-600 border-emerald-200' },
+  completed: { label: 'Hoàn thành', classes: 'bg-blue-50 text-blue-600 border-blue-200' },
+  on_hold: { label: 'Tạm dừng', classes: 'bg-amber-50 text-amber-600 border-amber-200' },
 };
 
 export default function ProjectDetail() {
-  // Lấy ID từ URL và xử lý trường hợp undefined
   const { id } = useParams<{ id: string }>();
   const projectId = id || '';
 
@@ -58,10 +59,10 @@ export default function ProjectDetail() {
   const [showCreateTask, setShowCreateTask] = useState(false);
   const [showInvite, setShowInvite] = useState(false);
 
-  // --- 2. Queries sử dụng Mock Data ---
+  // --- 2. Queries ---
   const { data: project, isLoading } = useQuery<Project | null>({
     queryKey: ['project', projectId],
-    queryFn: async () => MOCK_PROJECT, // Giả lập tìm dự án theo ID
+    queryFn: async () => MOCK_PROJECT,
     enabled: !!projectId,
   });
 
@@ -82,18 +83,10 @@ export default function ProjectDetail() {
     staleTime: 5 * 60 * 1000,
   });
 
-  // --- 3. Logic tính toán (Dùng useMemo để tối ưu) ---
-  const userMap = useMemo(() => 
-    Object.fromEntries(users.map((u: User) => [u.id, u])), 
-  [users]);
-
-  const dept = useMemo(() => 
-    departments.find((d: Department) => d.id === project?.department_id), 
-  [departments, project]);
-
-  const memberUsers = useMemo(() => 
-    (project?.member_ids || []).map(id => userMap[id]).filter((u): u is User => !!u), 
-  [project, userMap]);
+  // --- 3. Logic ---
+  const userMap = useMemo(() => Object.fromEntries(users.map((u: User) => [u.id, u])), [users]);
+  const dept = useMemo(() => departments.find((d: Department) => d.id === project?.department_id), [departments, project]);
+  const memberUsers = useMemo(() => (project?.member_ids || []).map(id => userMap[id]).filter((u): u is User => !!u), [project, userMap]);
 
   const stats = useMemo(() => {
     const done = tasks.filter(t => t.status === 'done').length;
@@ -106,8 +99,8 @@ export default function ProjectDetail() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center py-32">
-        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      <div className="flex items-center justify-center h-full">
+        <Loader2 className="w-8 h-8 animate-spin text-emerald-600" />
       </div>
     );
   }
@@ -115,96 +108,130 @@ export default function ProjectDetail() {
   if (!project) {
     return (
       <div className="flex flex-col items-center justify-center py-20">
-        <p className="text-muted-foreground font-medium">Không tìm thấy dữ án.</p>
-        <Link to="/projects" className="text-primary text-sm mt-4 font-bold hover:underline">← Quay lại danh sách</Link>
+        <p className="text-slate-500 font-medium">Không tìm thấy dự án.</p>
+        <Link to="/projects" className="text-emerald-600 text-[13px] mt-4 font-semibold hover:underline">← Quay lại danh sách</Link>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6 pb-10">
-      {/* Header Section */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
-        <div className="flex items-start gap-4">
-          <Link to="/projects" className="p-2 hover:bg-accent rounded-full transition-colors mt-1">
-            <ArrowLeft className="w-5 h-5 text-muted-foreground" />
-          </Link>
-          <div>
-            <div className="flex items-center gap-3 flex-wrap">
-              <div className="w-10 h-10 rounded-xl flex items-center justify-center shadow-sm" style={{ backgroundColor: (project.color || '#2563EB') + '20' }}>
-                <span className="text-lg font-bold" style={{ color: project.color || '#2563EB' }}>{project.name[0]}</span>
-              </div>
-              <h1 className="text-2xl font-bold text-foreground tracking-tight">{project.name}</h1>
-              {dept && <Badge variant="secondary" className="text-[10px] font-bold uppercase">{dept.name}</Badge>}
-              <Badge variant="secondary" className={cn("text-[10px] font-bold uppercase", statusCfg.color)}>{statusCfg.label}</Badge>
+    <div className="flex flex-col h-[calc(100vh-64px)] bg-white -mx-6 -mt-6">
+      {/* 1. TOP HEADER (Chuẩn Base) */}
+      <div className="bg-white px-6 pt-5 flex-shrink-0 z-10">
+        {/* Breadcrumb & Title */}
+        <div className="flex items-start justify-between mb-4">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-md flex items-center justify-center mt-0.5 shrink-0" style={{ backgroundColor: project.color || '#2563EB' }}>
+              <span className="text-lg font-bold text-white">{project.name[0]}</span>
             </div>
-            <p className="text-sm text-muted-foreground mt-2 font-medium max-w-2xl">{project.description}</p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-4 flex-shrink-0">
-          <div className="flex -space-x-2.5">
-            {memberUsers.slice(0, 4).map((m: User) => (
-              <Avatar key={m.id} className="h-9 w-9 border-2 border-background shadow-sm">
-                <AvatarImage src={m.avatar} />
-                <AvatarFallback className="text-xs font-bold">{m.full_name[0]}</AvatarFallback>
-              </Avatar>
-            ))}
-            {memberUsers.length > 4 && (
-              <div className="h-9 w-9 rounded-full bg-accent flex items-center justify-center border-2 border-background text-xs font-bold text-muted-foreground">
-                +{memberUsers.length - 4}
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <Link to="/projects" className="text-[13px] text-slate-400 hover:text-emerald-600 transition-colors">Dự án</Link>
+                <span className="text-slate-300">/</span>
+                <h1 className="text-[18px] font-semibold text-slate-900 leading-tight">{project.name}</h1>
+                <Badge variant="outline" className={cn("text-[11px] font-medium px-2 py-0 h-5 border", statusCfg.classes)}>
+                  {statusCfg.label}
+                </Badge>
               </div>
-            )}
+              <div className="flex items-center gap-3 mt-1.5 text-[12px] text-slate-500">
+                {dept && <span>Phòng ban: <span className="font-medium text-slate-700">{dept.name}</span></span>}
+                <span>•</span>
+                <span className="truncate max-w-md">{project.description}</span>
+              </div>
+            </div>
           </div>
-          <Button variant="outline" size="sm" onClick={() => setShowInvite(true)} className="gap-2 font-bold shadow-sm">
-            <UserPlus className="w-4 h-4" /> Mời
-          </Button>
-          <Button size="sm" onClick={() => setShowCreateTask(true)} className="gap-2 font-bold shadow-sm">
-            <Plus className="w-4 h-4" /> Thêm việc
-          </Button>
+
+          {/* Action Buttons */}
+          <div className="flex items-center gap-3 flex-shrink-0">
+            {/* Thành viên */}
+            <div className="flex items-center gap-2 pr-4 border-r border-slate-200">
+              <div className="flex -space-x-1.5">
+                {memberUsers.slice(0, 4).map((m: User) => (
+                  <Avatar key={m.id} className="h-7 w-7 border-2 border-white">
+                    <AvatarImage src={m.avatar} />
+                    <AvatarFallback className="text-[10px] bg-slate-100 text-slate-600 font-medium">{m.full_name[0]}</AvatarFallback>
+                  </Avatar>
+                ))}
+                {memberUsers.length > 4 && (
+                  <div className="h-7 w-7 rounded-full bg-slate-100 flex items-center justify-center border-2 border-white text-[10px] font-medium text-slate-600 z-10">
+                    +{memberUsers.length - 4}
+                  </div>
+                )}
+              </div>
+              <Button variant="ghost" size="icon" onClick={() => setShowInvite(true)} className="w-7 h-7 rounded-full bg-slate-50 hover:bg-slate-200 text-slate-500">
+                <UserPlus className="w-3.5 h-3.5" />
+              </Button>
+            </div>
+
+            <Button variant="outline" size="sm" className="h-8 text-[13px] font-medium border-slate-300 text-slate-700">
+              <Settings className="w-3.5 h-3.5 mr-1.5 text-slate-400" /> Tùy chỉnh
+            </Button>
+            <Button size="sm" onClick={() => setShowCreateTask(true)} className="h-8 text-[13px] font-medium bg-emerald-600 hover:bg-emerald-700 text-white shadow-none">
+              <Plus className="w-3.5 h-3.5 mr-1.5" /> Giao việc mới
+            </Button>
+          </div>
+        </div>
+
+        {/* Minimal Progress Bar */}
+        <div className="flex items-center gap-4 mb-4">
+          <div className="flex-1 max-w-sm flex items-center gap-3">
+            <div className="flex-1 bg-slate-100 rounded-full h-1.5 overflow-hidden">
+              <div 
+                className="h-full transition-all duration-1000 ease-in-out" 
+                style={{ width: `${stats.percentage}%`, backgroundColor: project.color || '#10b981' }} 
+              />
+            </div>
+            <span className="text-[12px] font-semibold text-slate-700 w-8">{stats.percentage}%</span>
+          </div>
+          <div className="text-[12px] text-slate-500 flex items-center gap-1.5">
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" /> Đã hoàn thành {stats.done}/{stats.total} công việc
+          </div>
+        </div>
+
+        {/* View Tabs (Underline Style) */}
+        <div className="flex gap-6 border-b border-slate-200">
+          {[
+            { id: 'kanban', icon: LayoutGrid, label: 'Kanban Board' },
+            { id: 'list', icon: List, label: 'Danh sách' },
+            { id: 'gantt', icon: BarChart3, label: 'Timeline (Gantt)' },
+          ].map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setView(tab.id)}
+              className={cn(
+                "pb-2.5 text-[13px] font-medium transition-colors relative flex items-center gap-1.5",
+                view === tab.id 
+                  ? "text-emerald-600" 
+                  : "text-slate-500 hover:text-slate-900"
+              )}
+            >
+              <tab.icon className="w-3.5 h-3.5" /> {tab.label}
+              {view === tab.id && (
+                <div className="absolute bottom-0 left-0 w-full h-[2px] bg-emerald-600" />
+              )}
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* Progress Bar Section */}
-      <div className="bg-card rounded-xl border border-border p-6 shadow-sm">
-        <div className="flex items-center justify-between mb-3">
-          <span className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Tiến độ tổng thể</span>
-          <span className="text-sm font-bold" style={{ color: project.color || '#2563EB' }}>
-            {stats.percentage}% <span className="text-muted-foreground font-medium ml-1">({stats.done}/{stats.total} việc đã xong)</span>
-          </span>
-        </div>
-        <div className="w-full bg-accent/50 rounded-full h-2.5">
-          <div 
-            className="rounded-full h-2.5 transition-all duration-1000 ease-in-out" 
-            style={{ width: `${stats.percentage}%`, backgroundColor: project.color || '#2563EB' }} 
-          />
+      {/* 2. MAIN CONTENT AREA */}
+      <div className="flex-1 bg-slate-50 overflow-auto">
+        {/* Render Kanban/List/Gantt */}
+        {/* Truyền flex-1 và h-full vào bên trong các component con nếu chúng hỗ trợ để lấp đầy màn hình */}
+        <div className="h-full min-h-[480px] p-5">
+          {view === 'kanban' && <KanbanBoard projectId={projectId} tasks={tasks} users={users} />}
+          {view === 'list' && <ListView projectId={projectId} tasks={tasks} users={users} />}
+          {view === 'gantt' && <GanttChart projectId={projectId} tasks={tasks} users={users} />}
         </div>
       </div>
 
-      {/* View Tabs */}
-      <Tabs value={view} onValueChange={setView} className="w-full">
-        <TabsList className="bg-muted/50 p-1">
-          <TabsTrigger value="kanban" className="gap-2 text-xs font-bold uppercase tracking-tight px-6"><LayoutGrid className="w-3.5 h-3.5" />Kanban</TabsTrigger>
-          <TabsTrigger value="list" className="gap-2 text-xs font-bold uppercase tracking-tight px-6"><List className="w-3.5 h-3.5" />Danh sách</TabsTrigger>
-          <TabsTrigger value="gantt" className="gap-2 text-xs font-bold uppercase tracking-tight px-6"><BarChart3 className="w-3.5 h-3.5" />Timeline</TabsTrigger>
-        </TabsList>
-      </Tabs>
-
-      {/* Content Rendering */}
-      <div className="mt-6">
-        {view === 'kanban' && <KanbanBoard projectId={projectId} tasks={tasks} users={users} />}
-        {view === 'list' && <ListView projectId={projectId} tasks={tasks} users={users} />}
-        {view === 'gantt' && <GanttChart projectId={projectId} tasks={tasks} users={users} />}
-      </div>
-
-      {/* Modals */}
+      {/* 3. MODALS */}
       <CreateTaskModal open={showCreateTask} onClose={() => setShowCreateTask(false)} defaultProjectId={projectId} />
-        <InviteMembersModal 
-  open={showInvite} 
-  onClose={() => setShowInvite(false)} 
-  // Nếu project là null, TS sẽ chửi, nên ta đảm bảo nó là Project hoặc dùng as
-  project={project as Project} 
-/>
+      <InviteMembersModal 
+        open={showInvite} 
+        onClose={() => setShowInvite(false)} 
+        project={project as Project} 
+      />
     </div>
   );
 }

@@ -1,8 +1,7 @@
-import { useState, type ReactNode } from 'react'; // Thêm type ReactNode
+import { useState, type ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useAppContext } from '@/lib/AppContext.tsx';
-// Import Type chuẩn
 import { type Project, type Department, type User } from '@/types';
 import { 
   LayoutDashboard, 
@@ -12,14 +11,14 @@ import {
   ChevronLeft, 
   ChevronRight, 
   ChevronDown,
+  UserCheck, // Import thêm icon UserCheck
   type LucideIcon 
 } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 
-// --- 1. Mock Data (Thay thế API thật) ---
-// --- 1. Mock Data (Đã xóa các trường thừa gây lỗi) ---
+// --- 1. Mock Data ---
 const MOCK_USER: User = {
   id: 'u1',
   full_name: 'Tăng Ngọc Hậu',
@@ -28,20 +27,8 @@ const MOCK_USER: User = {
 };
 
 const MOCK_PROJECTS: Project[] = [
-  { 
-    id: 'p1', 
-    name: 'Hệ thống Quản lý Dự án', 
-    status: 'active', 
-    progress: 45, 
-    color: '#2563EB' 
-  },
-  { 
-    id: 'p2', 
-    name: 'App Học Tiếng Nhật AI', 
-    status: 'planning', 
-    progress: 0, 
-    color: '#7C3AED' 
-  },
+  { id: 'p1', name: 'Hệ thống Quản lý Dự án', status: 'active', progress: 45, color: '#2563EB' },
+  { id: 'p2', name: 'App Học Tiếng Nhật AI', status: 'planning', progress: 0, color: '#7C3AED' },
 ];
 
 const MOCK_DEPTS: Department[] = [
@@ -174,6 +161,9 @@ export default function Sidebar() {
         {/* Navigation */}
         <nav className="flex-1 py-6 px-3 space-y-2 overflow-y-auto custom-scrollbar">
           <NavItem path="/" icon={LayoutDashboard} label="Dashboard" />
+          
+          {/* MỤC "VIỆC CỦA TÔI" ĐƯỢC THÊM VÀO ĐÂY */}
+          <NavItem path="/my-tasks" icon={UserCheck} label="Việc của tôi" />
 
           <NavItem
             path="/projects"

@@ -1,7 +1,6 @@
 import { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-// Import Type chuẩn từ file index.ts
 import { type Project, type Department, type Task, type User, type ProjectStatus } from '@/types';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
@@ -11,21 +10,23 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { Label } from '@/components/ui/label';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue
 } from '@/components/ui/select';
-import { Plus, FolderKanban, ArrowRight, Loader2 } from 'lucide-react';
+import { 
+  Plus, FolderKanban, Loader2, Search, Filter, 
+  ChevronDown, MoreHorizontal, ArrowRight 
+} from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-// --- 1. Cấu hình & Mock Data ---
+// --- 1. Mock Data ---
 const COLORS = ['#2563EB', '#7C3AED', '#059669', '#DC2626', '#D97706', '#0891B2'];
 
-const PROJECT_STATUS_CONFIG: Record<ProjectStatus, { label: string; color: string }> = {
-  planning: { label: 'Lập kế hoạch', color: 'bg-slate-100 text-slate-600' },
-  active: { label: 'Đang chạy', color: 'bg-blue-100 text-blue-600' },
-  completed: { label: 'Hoàn thành', color: 'bg-emerald-100 text-emerald-600' },
-  on_hold: { label: 'Tạm dừng', color: 'bg-amber-100 text-amber-600' },
+const PROJECT_STATUS_CONFIG: Record<ProjectStatus, { label: string; classes: string }> = {
+  planning: { label: 'Lập kế hoạch', classes: 'bg-slate-100 text-slate-600 border-slate-200' },
+  active: { label: 'Đang chạy', classes: 'bg-emerald-50 text-emerald-600 border-emerald-200' },
+  completed: { label: 'Hoàn thành', classes: 'bg-blue-50 text-blue-600 border-blue-200' },
+  on_hold: { label: 'Tạm dừng', classes: 'bg-amber-50 text-amber-600 border-amber-200' },
 };
 
 const MOCK_DEPTS: Department[] = [
@@ -48,7 +49,7 @@ const MOCK_USERS: User[] = [
   { id: 'u2', full_name: 'Nguyễn Văn A', email: 'vana@itpm.pro', avatar: '' },
 ];
 
-// --- 2. CreateProjectModal với Props chuẩn ---
+// --- 2. Modal Tạo Dự Án (Chuẩn Base) ---
 interface CreateProjectModalProps {
   open: boolean;
   onClose: () => void;
@@ -79,7 +80,6 @@ function CreateProjectModal({ open, onClose }: CreateProjectModalProps) {
 
   const mutation = useMutation({
     mutationFn: async (data: ProjectForm) => {
-      console.log("Mock Create Project:", data);
       await new Promise(r => setTimeout(r, 800));
       return { id: Math.random().toString(), ...data };
     },
@@ -92,35 +92,47 @@ function CreateProjectModal({ open, onClose }: CreateProjectModalProps) {
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader><DialogTitle className="font-bold tracking-tight">Tạo dự án mới</DialogTitle></DialogHeader>
-        <div className="space-y-4 py-2">
-          <div><Label className="text-xs font-bold uppercase">Tên dự án *</Label><Input value={form.name} onChange={e => set('name', e.target.value)} placeholder="VD: Hệ thống CRM..." className="mt-1" /></div>
-          <div><Label className="text-xs font-bold uppercase">Mô tả</Label><Textarea value={form.description} onChange={e => set('description', e.target.value)} rows={3} placeholder="Mục tiêu dự án..." className="mt-1" /></div>
+      <DialogContent className="sm:max-w-md p-0 overflow-hidden border-slate-200 shadow-lg">
+        <DialogHeader className="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
+          <DialogTitle className="text-[16px] font-semibold text-slate-800">Tạo dự án mới</DialogTitle>
+        </DialogHeader>
+        <div className="px-6 py-4 space-y-4">
+          <div className="space-y-1.5">
+            <label className="text-[12px] font-medium text-slate-700">Tên dự án <span className="text-red-500">*</span></label>
+            <Input value={form.name} onChange={e => set('name', e.target.value)} placeholder="Nhập tên dự án..." className="h-9 text-[13px] border-slate-300 focus-visible:ring-emerald-500" />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-[12px] font-medium text-slate-700">Mô tả mục tiêu</label>
+            <Textarea value={form.description} onChange={e => set('description', e.target.value)} rows={3} placeholder="Mô tả ngắn gọn..." className="text-[13px] border-slate-300 focus-visible:ring-emerald-500 resize-none" />
+          </div>
           <div className="grid grid-cols-2 gap-4">
-            <div>
-              <Label className="text-xs font-bold uppercase">Phòng ban</Label>
+            <div className="space-y-1.5">
+              <label className="text-[12px] font-medium text-slate-700">Phòng ban</label>
               <Select value={form.department_id} onValueChange={v => set('department_id', v)}>
-                <SelectTrigger className="mt-1"><SelectValue placeholder="Chọn..." /></SelectTrigger>
-                <SelectContent>{departments.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}</SelectContent>
+                <SelectTrigger className="h-9 text-[13px] border-slate-300 focus:ring-emerald-500">
+                  <SelectValue placeholder="Chọn phòng ban" />
+                </SelectTrigger>
+                <SelectContent>
+                  {departments.map(d => <SelectItem key={d.id} value={d.id} className="text-[13px]">{d.name}</SelectItem>)}
+                </SelectContent>
               </Select>
             </div>
-            <div>
-              <Label className="text-xs font-bold uppercase">Màu sắc</Label>
-              <div className="flex gap-2 mt-2">
+            <div className="space-y-1.5">
+              <label className="text-[12px] font-medium text-slate-700">Màu sắc</label>
+              <div className="flex gap-2 pt-1">
                 {COLORS.map(c => (
                   <button key={c} type="button" onClick={() => set('color', c)}
-                    className="w-6 h-6 rounded-full transition-transform hover:scale-125 shadow-sm"
+                    className="w-6 h-6 rounded-full transition-transform hover:scale-110 shadow-sm"
                     style={{ backgroundColor: c, outline: form.color === c ? `2px solid ${c}` : 'none', outlineOffset: '2px' }} />
                 ))}
               </div>
             </div>
           </div>
         </div>
-        <DialogFooter className="mt-4">
-          <Button variant="outline" onClick={onClose} className="font-bold">Hủy</Button>
-          <Button disabled={!form.name || mutation.isPending} onClick={() => mutation.mutate(form)} className="font-bold">
-            {mutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Plus className="w-4 h-4 mr-2" />} Tạo dự án
+        <DialogFooter className="px-6 py-4 border-t border-slate-100 bg-slate-50/50">
+          <Button variant="outline" onClick={onClose} className="h-8 text-[13px] font-medium border-slate-300">Hủy</Button>
+          <Button disabled={!form.name || mutation.isPending} onClick={() => mutation.mutate(form)} className="h-8 text-[13px] font-medium bg-emerald-600 hover:bg-emerald-700 text-white">
+            {mutation.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" /> : <Plus className="w-3.5 h-3.5 mr-1.5" />} Tạo dự án
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -128,10 +140,11 @@ function CreateProjectModal({ open, onClose }: CreateProjectModalProps) {
   );
 }
 
+// --- 3. Trang Chính Projects ---
 export default function Projects() {
   const [showCreate, setShowCreate] = useState(false);
+  const [activeTab, setActiveTab] = useState('all');
   
-  // Queries sử dụng Mock Data
   const { data: projects = [], isLoading } = useQuery<Project[]>({ queryKey: ['projects'], queryFn: async () => MOCK_PROJECTS });
   const { data: departments = [] } = useQuery<Department[]>({ queryKey: ['departments'], queryFn: async () => MOCK_DEPTS });
   const { data: tasks = [] } = useQuery<Task[]>({ queryKey: ['tasks'], queryFn: async () => MOCK_TASKS });
@@ -141,97 +154,158 @@ export default function Projects() {
   const userMap = useMemo(() => Object.fromEntries(users.map(u => [u.id, u])), [users]);
 
   return (
-    <div className="space-y-8 pb-10">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground tracking-tight">Danh mục Dự án</h1>
-          <p className="text-sm text-muted-foreground mt-1 font-medium">Theo dõi và điều phối toàn bộ danh mục dự án ITPM.</p>
+    <div className="flex flex-col h-[calc(100vh-64px)] bg-white -mx-6 -mt-6">
+      
+      {/* HEADER & TABS */}
+      <div className="border-b border-slate-200 bg-white sticky top-0 z-10 px-6 pt-6">
+        <div className="flex items-center justify-between mb-4">
+          <h1 className="text-[22px] font-semibold text-slate-900 tracking-tight">Danh sách Dự án</h1>
+          <div className="flex items-center gap-2">
+            <Button size="sm" onClick={() => setShowCreate(true)} className="h-8 text-[13px] font-medium bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5 shadow-none">
+              <Plus className="w-3.5 h-3.5" /> Thêm dự án
+            </Button>
+          </div>
         </div>
-        <Button onClick={() => setShowCreate(true)} className="gap-2 font-bold shadow-sm">
-          <Plus className="w-4 h-4" /> Tạo dự án
-        </Button>
+
+        <div className="flex gap-6">
+          {[
+            { id: 'all', label: 'Tất cả dự án' },
+            { id: 'active', label: 'Đang chạy' },
+            { id: 'completed', label: 'Đã đóng' },
+          ].map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={cn(
+                "pb-3 text-[13px] font-medium transition-colors relative",
+                activeTab === tab.id ? "text-emerald-600" : "text-slate-500 hover:text-slate-900"
+              )}
+            >
+              {tab.label}
+              {activeTab === tab.id && <div className="absolute bottom-0 left-0 w-full h-[2px] bg-emerald-600" />}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {isLoading ? (
-        <div className="flex items-center justify-center py-32"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-          {projects.map((project: Project) => {
-            const dept = deptMap[project.department_id || ''];
-            const projTasks = tasks.filter((t: Task) => t.project_id === project.id);
-            const doneTasks = projTasks.filter((t: Task) => t.status === 'done').length;
-            const pct = projTasks.length > 0 ? Math.round((doneTasks / projTasks.length) * 100) : project.progress || 0;
-            const memberUsers = (project.member_ids || []).map(id => userMap[id]).filter((u): u is User => !!u);
-            const statusCfg = PROJECT_STATUS_CONFIG[project.status] || PROJECT_STATUS_CONFIG.planning;
+      {/* FILTER BAR */}
+      <div className="px-6 py-3 flex items-center justify-between bg-slate-50 border-b border-slate-200">
+        <div className="flex items-center gap-3">
+          <div className="relative w-72">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <Input placeholder="Tìm kiếm dự án..." className="h-8 pl-9 text-[13px] bg-white border-slate-300 focus-visible:ring-emerald-500" />
+          </div>
+          <Button variant="outline" size="sm" className="h-8 text-[13px] font-medium border-slate-300 gap-2 bg-white text-slate-600">
+            <Filter className="w-3.5 h-3.5 text-slate-400" /> Lọc
+          </Button>
+          <Button variant="ghost" size="sm" className="h-8 text-[13px] font-medium text-slate-600 hover:bg-slate-200">
+            Phòng ban <ChevronDown className="w-3 h-3 ml-1" />
+          </Button>
+        </div>
+      </div>
 
-            return (
-              <Link key={project.id} to={`/projects/${project.id}`}
-                className="group bg-card rounded-2xl border border-border p-6 hover:shadow-xl hover:border-primary/30 transition-all duration-300 block relative overflow-hidden">
-                {/* Dải màu trang trí */}
-                <div className="absolute top-0 left-0 w-full h-1" style={{ backgroundColor: project.color || '#2563EB' }} />
-                
-                <div className="flex items-start justify-between mb-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-11 h-11 rounded-xl flex items-center justify-center shadow-inner" style={{ backgroundColor: (project.color || '#2563EB') + '15' }}>
-                      <FolderKanban className="w-6 h-6" style={{ color: project.color || '#2563EB' }} />
-                    </div>
-                    <div className="min-w-0">
-                      <h3 className="text-base font-bold text-foreground group-hover:text-primary transition-colors truncate">{project.name}</h3>
-                      {dept && <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest mt-0.5">{dept.name}</p>}
-                    </div>
-                  </div>
-                  <Badge variant="secondary" className={cn("text-[10px] font-bold uppercase tracking-wider", statusCfg.color)}>
-                    {statusCfg.label}
-                  </Badge>
-                </div>
+      {/* PROJECT LIST (High Density Table View) */}
+      <div className="flex-1 overflow-auto bg-white p-6">
+        <div className="max-w-6xl mx-auto">
+          {isLoading ? (
+            <div className="flex items-center justify-center py-20"><Loader2 className="w-6 h-6 animate-spin text-emerald-600" /></div>
+          ) : projects.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-24 text-slate-400 border border-slate-200 border-dashed rounded-lg bg-slate-50/50">
+              <FolderKanban className="w-10 h-10 mb-3 text-slate-300" />
+              <p className="text-[13px] font-medium">Chưa có dự án nào.</p>
+            </div>
+          ) : (
+            <div className="border border-slate-200 rounded-md overflow-hidden bg-white">
+              {/* Table Header */}
+              <div className="flex items-center px-4 py-2.5 bg-slate-50 border-b border-slate-200 text-[12px] font-medium text-slate-500 uppercase tracking-wide">
+                <div className="w-10"></div>
+                <div className="flex-1">Tên dự án</div>
+                <div className="w-48 px-4">Tiến độ</div>
+                <div className="w-32 px-4 text-center">Trạng thái</div>
+                <div className="w-32 px-4 text-center">Thành viên</div>
+                <div className="w-12 text-center"></div>
+              </div>
 
-                <p className="text-sm text-muted-foreground line-clamp-2 mb-6 font-medium h-10">{project.description || 'Chưa có mô tả chi tiết cho dự án này.'}</p>
-                
-                <div className="mb-6">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-[10px] font-bold text-muted-foreground uppercase">Tiến độ hoàn thành</span>
-                    <span className="text-xs font-black" style={{ color: project.color || '#2563EB' }}>{pct}%</span>
-                  </div>
-                  <div className="w-full bg-accent/50 rounded-full h-2">
-                    <div className="rounded-full h-2 transition-all duration-700" style={{ width: `${pct}%`, backgroundColor: project.color || '#2563EB' }} />
-                  </div>
-                </div>
+              {/* Table Body */}
+              <div className="divide-y divide-slate-100">
+                {projects.map((project: Project) => {
+                  const dept = deptMap[project.department_id || ''];
+                  const projTasks = tasks.filter((t: Task) => t.project_id === project.id);
+                  const doneTasks = projTasks.filter((t: Task) => t.status === 'done').length;
+                  const pct = projTasks.length > 0 ? Math.round((doneTasks / projTasks.length) * 100) : project.progress || 0;
+                  const memberUsers = (project.member_ids || []).map(id => userMap[id]).filter((u): u is User => !!u);
+                  const statusCfg = PROJECT_STATUS_CONFIG[project.status] || PROJECT_STATUS_CONFIG.planning;
 
-                <div className="flex items-center justify-between pt-4 border-t border-border/50">
-                  <div className="flex items-center gap-4">
-                    <div className="flex -space-x-2.5">
-                      {memberUsers.slice(0, 3).map((m: User) => (
-                        <Avatar key={m.id} className="h-8 w-8 border-2 border-card shadow-sm">
-                          <AvatarImage src={m.avatar} />
-                          <AvatarFallback className="text-[10px] font-bold">{m.full_name?.[0]}</AvatarFallback>
-                        </Avatar>
-                      ))}
-                      {memberUsers.length > 3 && (
-                        <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center border-2 border-card text-[10px] font-bold text-muted-foreground">
-                          +{memberUsers.length - 3}
+                  return (
+                    <Link 
+                      key={project.id} 
+                      to={`/projects/${project.id}`}
+                      className="flex items-center px-4 py-3 hover:bg-slate-50 transition-colors group"
+                    >
+                      {/* Icon */}
+                      <div className="w-10 flex-shrink-0">
+                        <div className="w-7 h-7 rounded flex items-center justify-center" style={{ backgroundColor: (project.color || '#2563EB') + '20' }}>
+                          <FolderKanban className="w-3.5 h-3.5" style={{ color: project.color || '#2563EB' }} />
                         </div>
-                      )}
-                    </div>
-                    <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-tight">{doneTasks}/{projTasks.length} Task đã xong</span>
-                  </div>
-                  <div className="p-2 rounded-full group-hover:bg-primary group-hover:text-white transition-all duration-300">
-                    <ArrowRight className="w-4 h-4" />
-                  </div>
-                </div>
-              </Link>
-            );
-          })}
-        </div>
-      )}
+                      </div>
 
-      {/* Hiển thị khi không có dự án */}
-      {!isLoading && projects.length === 0 && (
-        <div className="flex flex-col items-center justify-center py-32 bg-accent/10 rounded-3xl border-2 border-dashed border-border">
-          <FolderKanban className="w-14 h-14 mb-4 text-muted-foreground/20" />
-          <p className="text-sm font-bold text-muted-foreground uppercase tracking-widest text-center">Chưa có dự án nào được khởi tạo</p>
-          <Button variant="link" onClick={() => setShowCreate(true)} className="mt-2 text-primary font-bold">Bắt đầu dự án đầu tiên ngay</Button>
+                      {/* Name & Dept */}
+                      <div className="flex-1 min-w-0 pr-4">
+                        <h3 className="text-[14px] font-medium text-slate-800 group-hover:text-emerald-600 transition-colors truncate">
+                          {project.name}
+                        </h3>
+                        {dept && <p className="text-[11px] text-slate-400 mt-0.5 truncate">{dept.name}</p>}
+                      </div>
+
+                      {/* Progress */}
+                      <div className="w-48 px-4 flex-shrink-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-[11px] font-semibold text-slate-700">{pct}%</span>
+                          <span className="text-[10px] text-slate-400">{doneTasks}/{projTasks.length} việc</span>
+                        </div>
+                        <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                          <div className="h-full transition-all duration-500" style={{ width: `${pct}%`, backgroundColor: project.color || '#10b981' }} />
+                        </div>
+                      </div>
+
+                      {/* Status */}
+                      <div className="w-32 px-4 flex-shrink-0 flex justify-center">
+                        <Badge variant="outline" className={cn("text-[11px] font-medium px-2 py-0.5 border whitespace-nowrap", statusCfg.classes)}>
+                          {statusCfg.label}
+                        </Badge>
+                      </div>
+
+                      {/* Members */}
+                      <div className="w-32 px-4 flex-shrink-0 flex justify-center">
+                        <div className="flex -space-x-1.5">
+                          {memberUsers.slice(0, 3).map((m: User) => (
+                            <Avatar key={m.id} className="h-6 w-6 border-2 border-white">
+                              <AvatarImage src={m.avatar} />
+                              <AvatarFallback className="text-[9px] bg-slate-100 text-slate-600 font-medium">{m.full_name?.[0]}</AvatarFallback>
+                            </Avatar>
+                          ))}
+                          {memberUsers.length > 3 && (
+                            <div className="h-6 w-6 rounded-full bg-slate-100 flex items-center justify-center border-2 border-white text-[9px] font-medium text-slate-600 z-10">
+                              +{memberUsers.length - 3}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Actions */}
+                      <div className="w-12 flex-shrink-0 flex justify-end">
+                        <button className="text-slate-300 opacity-0 group-hover:opacity-100 hover:text-slate-600 transition-all p-1">
+                          <MoreHorizontal className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
-      )}
+      </div>
 
       <CreateProjectModal open={showCreate} onClose={() => setShowCreate(false)} />
     </div>
