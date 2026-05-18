@@ -1,0 +1,17 @@
+{
+  "name": "itpm-repo",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "frontend",
+    "backend"
+  ],
+  "scripts": {
+    "start:fe": "npm run dev --workspace=frontend",
+    "start:be": "npm run dev --workspace=backend",
+    "dev": "concurrently -c \"cyan.bold,magenta.bold\" -n \"REACT,NODE\" \"npm run start:fe\" \"npm run start:be\""
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

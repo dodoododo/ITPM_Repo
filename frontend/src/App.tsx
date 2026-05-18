@@ -14,6 +14,7 @@ import ProjectDetail from '@/pages/ProjectDetail';
 import Departments from '@/pages/Departments';
 import DepartmentDetail from '@/pages/DepartmentDetail';
 import Settings from '@/pages/Settings';
+import MyTasks from '@/pages/MyTasks';
 
 const AuthenticatedApp = () => {
   const { isLoadingAuth, isLoadingPublicSettings, authError, navigateToLogin } = useAuth();
@@ -46,6 +47,7 @@ const AuthenticatedApp = () => {
           <Route path="/departments" element={<Departments />} />
           <Route path="/departments/:id" element={<DepartmentDetail />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/my-tasks" element={<MyTasks />} />
         </Route>
       </Routes>
     </AppProvider>
