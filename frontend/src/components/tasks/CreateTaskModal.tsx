@@ -1,189 +1,211 @@
-import { useState, type FormEvent } from 'react'; // Bỏ React dư thừa, thêm type FormEvent
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-// Đã xóa import base44
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter
-} from '@/components/ui/dialog';
+import { useEffect, useState, type FormEvent } from 'react';
+import { Loader2 } from 'lucide-react';
+import { useAuth } from '@/hooks/useAuth';
+import { projectService } from '@/services/projectService';
+import { taskService } from '@/services/taskService';
+import { userService } from '@/services/userService';
+import RichTextEditor from '@/components/tasks/RichTextEditor';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2 } from 'lucide-react';
-
-// --- 1. Định nghĩa các Interface ---
-interface Project {
-  id: string;
-  name: string;
-}
-
-interface User {
-  id: string;
-  full_name: string;
-  email: string;
-}
+import type { Project, TaskPriority, User } from '@/types';
 
 interface TaskForm {
   title: string;
-  description: string;
+  content_html: string;
   project_id: string;
   assignee_id: string;
   reviewer_id: string;
-  priority: string;
+  priority: TaskPriority;
   start_date: string;
   due_date: string;
-  status: string;
-  subtasks: any[];
-  attachment_count: number;
 }
 
 interface CreateTaskModalProps {
   open: boolean;
   onClose: () => void;
   defaultProjectId?: string;
+  onCreated?: () => void;
 }
 
-const EMPTY: TaskForm = { 
-  title: '', description: '', project_id: '', assignee_id: '', reviewer_id: '', 
-  priority: 'medium', start_date: '', due_date: '', status: 'todo', 
-  subtasks: [], attachment_count: 0 
+const emptyForm: TaskForm = {
+  title: '',
+  content_html: '',
+  project_id: '',
+  assignee_id: 'none',
+  reviewer_id: 'none',
+  priority: 'medium',
+  start_date: '',
+  due_date: '',
 };
 
-// --- 2. Mock Data ---
-const MOCK_PROJECTS: Project[] = [
-  { id: 'p1', name: 'Dự án AI học tiếng Nhật' },
-  { id: 'p2', name: 'Web Quản lý ITPM' },
-];
+const getEntityId = (value: { _id?: string; id?: string }) => value._id || value.id || '';
 
-const MOCK_USERS: User[] = [
-  { id: 'u1', full_name: 'Tăng Ngọc Hậu', email: 'hau@itpm.com' },
-  { id: 'u2', full_name: 'Phó Phòng Kỹ Thuật', email: 'pho@itpm.com' },
-];
+export default function CreateTaskModal({ open, onClose, defaultProjectId, onCreated }: CreateTaskModalProps) {
+  const { token } = useAuth();
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
+  const [form, setForm] = useState<TaskForm>({ ...emptyForm, project_id: defaultProjectId || '' });
+  const [isLoading, setIsLoading] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState('');
 
-export default function CreateTaskModal({ open, onClose, defaultProjectId }: CreateTaskModalProps) {
-  const qc = useQueryClient();
-  const [form, setForm] = useState<TaskForm>({ ...EMPTY, project_id: defaultProjectId || '' });
+  useEffect(() => {
+    if (!open) return;
+    setForm((current) => ({ ...current, project_id: defaultProjectId || current.project_id }));
+    void loadOptions();
+  }, [open, defaultProjectId, token]);
 
-  // Fix lỗi k và v có kiểu any
-  const set = (k: keyof TaskForm, v: any) => setForm(p => ({ ...p, [k]: v }));
+  const loadOptions = async () => {
+    if (!token) return;
 
-  // Thay thế API thực bằng Mock
-  const { data: projects = [] } = useQuery<Project[]>({ 
-    queryKey: ['projects'], 
-    queryFn: async () => MOCK_PROJECTS 
-  });
-  
-  const { data: users = [] } = useQuery<User[]>({ 
-    queryKey: ['users'], 
-    queryFn: async () => MOCK_USERS, 
-    staleTime: 5 * 60 * 1000 
-  });
+    try {
+      setIsLoading(true);
+      const [projectResponse, userResponse] = await Promise.all([
+        projectService.getProjects(token, { page: 1, limit: 100 }),
+        userService.getUsers(token),
+      ]);
+      setProjects(projectResponse.data || []);
+      setUsers(userResponse.data || []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load task form data');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
-  const mutation = useMutation({
-    // mutationFn nhận data kiểu TaskForm để fix lỗi 'Argument is not assignable to void'
-    mutationFn: async (data: TaskForm) => {
-      console.log("Đang tạo task:", data);
-      await new Promise(resolve => setTimeout(resolve, 800)); // Giả lập delay
-      return { success: true };
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['tasks'] });
-      qc.invalidateQueries({ queryKey: ['tasks', form.project_id] });
-      setForm({ ...EMPTY, project_id: defaultProjectId || '' });
+  const set = <K extends keyof TaskForm>(key: K, value: TaskForm[K]) => {
+    setForm((current) => ({ ...current, [key]: value }));
+  };
+
+  const reset = () => {
+    setForm({ ...emptyForm, project_id: defaultProjectId || '' });
+    setError('');
+  };
+
+  const handleSubmit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!token || !form.title.trim() || !form.project_id) return;
+
+    try {
+      setIsSaving(true);
+      setError('');
+      await taskService.createTask({
+        title: form.title.trim(),
+        project_id: form.project_id,
+        assignee_id: form.assignee_id === 'none' ? undefined : form.assignee_id,
+        reviewer_id: form.reviewer_id === 'none' ? undefined : form.reviewer_id,
+        priority: form.priority,
+        start_date: form.start_date || undefined,
+        due_date: form.due_date || undefined,
+        content_html: form.content_html,
+      }, token);
+      reset();
+      onCreated?.();
       onClose();
-    },
-  });
-
-  const handleSubmit = (e: FormEvent) => {
-    e.preventDefault();
-    if (!form.title || !form.project_id) return;
-    mutation.mutate(form);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create task');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader><DialogTitle>Tạo công việc mới</DialogTitle></DialogHeader>
+      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Tao cong viec moi</DialogTitle>
+        </DialogHeader>
+
         <form onSubmit={handleSubmit} className="space-y-4">
+          {error && <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+
           <div>
-            <Label>Tiêu đề *</Label>
-            <Input 
-              value={form.title} 
-              onChange={e => set('title', e.target.value)} 
-              placeholder="Nhập tiêu đề công việc..." 
+            <Label>Tieu de *</Label>
+            <Input
+              value={form.title}
+              onChange={(event) => set('title', event.target.value)}
+              placeholder="Nhap tieu de cong viec..."
             />
           </div>
+
           <div>
-            <Label>Mô tả</Label>
-            <Textarea 
-              value={form.description} 
-              onChange={e => set('description', e.target.value)} 
-              placeholder="Mô tả chi tiết..." 
-              rows={3} 
-            />
+            <Label>Mo ta</Label>
+            <RichTextEditor value={form.content_html} onChange={(value) => set('content_html', value)} disabled={isSaving} />
           </div>
-          <div className="grid grid-cols-2 gap-4">
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <Label>Dự án *</Label>
-              <Select value={form.project_id} onValueChange={v => set('project_id', v)}>
-                <SelectTrigger><SelectValue placeholder="Chọn dự án" /></SelectTrigger>
+              <Label>Du an *</Label>
+              <Select value={form.project_id} onValueChange={(value) => set('project_id', value)}>
+                <SelectTrigger><SelectValue placeholder={isLoading ? 'Dang tai...' : 'Chon du an'} /></SelectTrigger>
                 <SelectContent>
-                  {projects.map((p: Project) => (
-                    <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                  {projects.map((project) => (
+                    <SelectItem key={getEntityId(project)} value={getEntityId(project)}>{project.name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
+
             <div>
-              <Label>Độ ưu tiên</Label>
-              <Select value={form.priority} onValueChange={v => set('priority', v)}>
+              <Label>Do uu tien</Label>
+              <Select value={form.priority} onValueChange={(value) => set('priority', value as TaskPriority)}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="low">Thấp</SelectItem>
-                  <SelectItem value="medium">Trung bình</SelectItem>
+                  <SelectItem value="low">Thap</SelectItem>
+                  <SelectItem value="medium">Trung binh</SelectItem>
                   <SelectItem value="high">Cao</SelectItem>
+                  <SelectItem value="urgent">Khan cap</SelectItem>
                 </SelectContent>
               </Select>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-4">
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <Label>Người thực hiện</Label>
-              <Select value={form.assignee_id} onValueChange={v => set('assignee_id', v)}>
-                <SelectTrigger><SelectValue placeholder="Chọn người" /></SelectTrigger>
+              <Label>Assignee</Label>
+              <Select value={form.assignee_id} onValueChange={(value) => set('assignee_id', value)}>
+                <SelectTrigger><SelectValue placeholder="Chon nguoi lam" /></SelectTrigger>
                 <SelectContent>
-                  {users.map((u: User) => (
-                    <SelectItem key={u.id} value={u.id}>{u.full_name || u.email}</SelectItem>
+                  <SelectItem value="none">Chua phan cong</SelectItem>
+                  {users.map((user) => (
+                    <SelectItem key={getEntityId(user)} value={getEntityId(user)}>{user.full_name || user.email}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
+
             <div>
-              <Label>Người duyệt</Label>
-              <Select value={form.reviewer_id} onValueChange={v => set('reviewer_id', v)}>
-                <SelectTrigger><SelectValue placeholder="Chọn người" /></SelectTrigger>
+              <Label>Reviewer</Label>
+              <Select value={form.reviewer_id} onValueChange={(value) => set('reviewer_id', value)}>
+                <SelectTrigger><SelectValue placeholder="Chon nguoi duyet" /></SelectTrigger>
                 <SelectContent>
-                  {users.map((u: User) => (
-                    <SelectItem key={u.id} value={u.id}>{u.full_name || u.email}</SelectItem>
+                  <SelectItem value="none">Chua co reviewer</SelectItem>
+                  {users.map((user) => (
+                    <SelectItem key={getEntityId(user)} value={getEntityId(user)}>{user.full_name || user.email}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-4">
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <Label>Ngày bắt đầu</Label>
-              <Input type="date" value={form.start_date} onChange={e => set('start_date', e.target.value)} />
+              <Label>Ngay bat dau</Label>
+              <Input type="date" value={form.start_date} onChange={(event) => set('start_date', event.target.value)} />
             </div>
             <div>
-              <Label>Hạn chót</Label>
-              <Input type="date" value={form.due_date} onChange={e => set('due_date', e.target.value)} />
+              <Label>Han chot</Label>
+              <Input type="date" value={form.due_date} onChange={(event) => set('due_date', event.target.value)} />
             </div>
           </div>
+
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={onClose}>Hủy</Button>
-            <Button type="submit" disabled={!form.title || !form.project_id || mutation.isPending}>
-              {mutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Tạo công việc'}
+            <Button type="button" variant="outline" onClick={onClose}>Huy</Button>
+            <Button type="submit" disabled={!form.title.trim() || !form.project_id || isSaving}>
+              {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Tao cong viec'}
             </Button>
           </DialogFooter>
         </form>

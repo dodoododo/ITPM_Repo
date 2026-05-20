@@ -1,64 +1,99 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-// Import Type chuẩn từ file index.ts
-import { type Task, type User, type TaskStatus } from '@/types';
+import { DragDropContext, Draggable, Droppable, type DropResult } from '@hello-pangea/dnd';
+import { useAuth } from '@/hooks/useAuth';
+import { taskService } from '@/services/taskService';
+import { type Task, type TaskStatus, type User } from '@/types';
 import TaskCard from './TaskCard.tsx';
 import TaskDetailPanel from './TaskDetailPanel.tsx';
-import { 
-  DragDropContext, 
-  Droppable, 
-  Draggable, 
-  type DropResult 
-} from '@hello-pangea/dnd';
 import { cn } from '@/lib/utils';
 
-// Cấu hình cột cục bộ (thay cho file .js bị lỗi)
 const COLUMNS: TaskStatus[] = ['todo', 'in_progress', 'review', 'done'];
 
 const STATUS_CONFIG: Record<TaskStatus, { label: string; dot: string }> = {
-  todo: { label: 'Cần làm', dot: 'bg-slate-400' },
-  in_progress: { label: 'Đang làm', dot: 'bg-blue-500' },
-  review: { label: 'Chờ duyệt', dot: 'bg-amber-500' },
-  done: { label: 'Hoàn thành', dot: 'bg-emerald-500' },
+  todo: { label: 'Todo', dot: 'bg-slate-400' },
+  in_progress: { label: 'In Progress', dot: 'bg-blue-500' },
+  review: { label: 'Review', dot: 'bg-amber-500' },
+  done: { label: 'Done', dot: 'bg-emerald-500' },
 };
 
 interface KanbanBoardProps {
   projectId: string;
   tasks: Task[];
   users: User[];
+  onTaskUpdated?: (task: Task) => void;
+  initialTaskId?: string;
+  onTaskDetailClose?: () => void;
 }
 
-export default function KanbanBoard({ projectId, tasks = [], users = [] }: KanbanBoardProps) {
+export default function KanbanBoard({
+  projectId,
+  tasks = [],
+  users = [],
+  onTaskUpdated,
+  initialTaskId = '',
+  onTaskDetailClose,
+}: KanbanBoardProps) {
   const qc = useQueryClient();
-  
-  // Fix lỗi "never": Khai báo kiểu cho State
+  const { token } = useAuth();
+  const [localTasks, setLocalTasks] = useState<Task[]>(tasks);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const [autoOpenedTaskId, setAutoOpenedTaskId] = useState('');
 
-  // Mock Mutation (Không dùng base44)
+  useEffect(() => {
+    setLocalTasks(tasks);
+  }, [tasks]);
+
+  useEffect(() => {
+    if (!initialTaskId) {
+      setAutoOpenedTaskId('');
+      return;
+    }
+
+    if (autoOpenedTaskId === initialTaskId) return;
+
+    const task = localTasks.find((item) => item.id === initialTaskId || item._id === initialTaskId);
+    if (task) {
+      setSelectedTask(task);
+      setAutoOpenedTaskId(initialTaskId);
+    }
+  }, [initialTaskId, localTasks, autoOpenedTaskId]);
+
   const mutation = useMutation({
     mutationFn: async ({ id, status }: { id: string; status: TaskStatus }) => {
-      console.log(`Mock Update Task ${id} to status: ${status}`);
-      await new Promise(resolve => setTimeout(resolve, 500));
-      return { id, status };
+      if (!token) throw new Error('Missing auth token');
+      return taskService.updateTaskStatus(id, status, token);
     },
-    onSuccess: () => {
+    onSuccess: (response) => {
+      if (response.data) {
+        setLocalTasks((current) => current.map((task) => task.id === response.data?.id ? response.data : task));
+        onTaskUpdated?.(response.data);
+      }
       qc.invalidateQueries({ queryKey: ['tasks', projectId] });
       qc.invalidateQueries({ queryKey: ['tasks'] });
+    },
+    onError: () => {
+      setLocalTasks(tasks);
     },
   });
 
   const handleDragEnd = (result: DropResult) => {
     const { draggableId, destination } = result;
-    
-    // Nếu kéo ra ngoài hoặc không thay đổi vị trí
     if (!destination) return;
-    
-    const task = tasks.find(t => t.id === draggableId);
-    const newStatus = destination.droppableId as TaskStatus;
 
-    if (task && task.status !== newStatus) {
-      // Cập nhật trạng thái thông qua mutation
-      mutation.mutate({ id: draggableId, status: newStatus });
+    const task = localTasks.find((item) => item.id === draggableId);
+    const nextStatus = destination.droppableId as TaskStatus;
+
+    if (task && nextStatus === 'done' && task.status !== 'done') {
+      setSelectedTask(task);
+      return;
+    }
+
+    if (task && task.status !== nextStatus) {
+      setLocalTasks((current) => current.map((item) => (
+        item.id === draggableId ? { ...item, status: nextStatus } : item
+      )));
+      mutation.mutate({ id: draggableId, status: nextStatus });
     }
   };
 
@@ -66,65 +101,54 @@ export default function KanbanBoard({ projectId, tasks = [], users = [] }: Kanba
     <>
       <DragDropContext onDragEnd={handleDragEnd}>
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 pb-4">
-          {COLUMNS.map(colId => {
-            const config = STATUS_CONFIG[colId];
-            const colTasks = tasks.filter(t => t.status === colId);
+          {COLUMNS.map((columnId) => {
+            const config = STATUS_CONFIG[columnId];
+            const columnTasks = localTasks.filter((task) => task.status === columnId);
 
             return (
-              <div key={colId} className="flex flex-col h-full min-h-[500px]">
-                {/* Column Header */}
+              <div key={columnId} className="flex flex-col h-full min-h-[500px]">
                 <div className="flex items-center gap-2 mb-3 px-1">
-                  <span className={cn("w-2.5 h-2.5 rounded-full", config.dot)} />
-                  <h3 className="text-sm font-bold text-foreground uppercase tracking-tight">
-                    {config.label}
-                  </h3>
+                  <span className={cn('w-2.5 h-2.5 rounded-full', config.dot)} />
+                  <h3 className="text-sm font-bold text-foreground uppercase tracking-tight">{config.label}</h3>
                   <span className="ml-auto text-[10px] text-muted-foreground bg-accent/50 rounded-full px-2 py-0.5 font-bold">
-                    {colTasks.length}
+                    {columnTasks.length}
                   </span>
                 </div>
 
-                {/* Droppable Area */}
-                <Droppable droppableId={colId}>
+                <Droppable droppableId={columnId}>
                   {(provided, snapshot) => (
                     <div
                       ref={provided.innerRef}
                       {...provided.droppableProps}
                       className={cn(
-                        "flex-1 space-y-3 p-2 rounded-xl transition-all duration-200 border-2 border-transparent",
-                        snapshot.isDraggingOver 
-                          ? "bg-primary/5 border-dashed border-primary/20" 
-                          : "bg-accent/20"
+                        'flex-1 space-y-3 p-2 rounded-xl transition-all duration-200 border-2 border-transparent',
+                        snapshot.isDraggingOver ? 'bg-primary/5 border-dashed border-primary/20' : 'bg-accent/20'
                       )}
                     >
-                      {colTasks.map((task, index) => (
+                      {columnTasks.map((task, index) => (
                         <Draggable key={task.id} draggableId={task.id} index={index}>
-                          {(provided, snapshot) => (
+                          {(dragProvided, dragSnapshot) => (
                             <div
-                              ref={provided.innerRef}
-                              {...provided.draggableProps}
-                              {...provided.dragHandleProps}
-                              className={cn(
-                                "transition-transform",
-                                snapshot.isDragging && "rotate-2 scale-105 z-50"
-                              )}
+                              ref={dragProvided.innerRef}
+                              {...dragProvided.draggableProps}
+                              {...dragProvided.dragHandleProps}
+                              className={cn('transition-transform', dragSnapshot.isDragging && 'rotate-2 scale-105 z-50')}
                             >
-                              <TaskCard 
-                                task={task} 
-                                users={users as any[]} 
-                                onClick={setSelectedTask} 
-                                isDragging={snapshot.isDragging} 
+                              <TaskCard
+                                task={task}
+                                users={users}
+                                onClick={setSelectedTask}
+                                isDragging={dragSnapshot.isDragging}
                               />
                             </div>
                           )}
                         </Draggable>
                       ))}
                       {provided.placeholder}
-                      
-                      {colTasks.length === 0 && !snapshot.isDraggingOver && (
+
+                      {columnTasks.length === 0 && !snapshot.isDraggingOver && (
                         <div className="h-24 border-2 border-dashed border-muted/20 rounded-lg flex items-center justify-center">
-                          <p className="text-[10px] text-muted-foreground italic text-center px-4">
-                            Kéo task vào đây
-                          </p>
+                          <p className="text-[10px] text-muted-foreground italic text-center px-4">Keo task vao day</p>
                         </div>
                       )}
                     </div>
@@ -136,15 +160,21 @@ export default function KanbanBoard({ projectId, tasks = [], users = [] }: Kanba
         </div>
       </DragDropContext>
 
-      {/* Detail Panel */}
       {selectedTask && (
         <TaskDetailPanel
           task={selectedTask}
           open={!!selectedTask}
-          onClose={() => setSelectedTask(null)}
+          onClose={() => {
+            setSelectedTask(null);
+            onTaskDetailClose?.();
+          }}
           projectId={projectId}
-          users={users as any[]}
-          onUpdate={(updated) => setSelectedTask(updated)}
+          users={users}
+          onUpdate={(updated) => {
+            setSelectedTask(updated);
+            setLocalTasks((current) => current.map((task) => task.id === updated.id ? updated : task));
+            onTaskUpdated?.(updated);
+          }}
         />
       )}
     </>

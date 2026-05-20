@@ -1,91 +1,36 @@
-// --- 1. ENUMS & LITERAL TYPES ---
+/**
+ * ============================================================================
+ * TYPES INDEX - Re-exports all types from individual type files
+ * ============================================================================
+ * 
+ * Import strategy:
+ * 1. For specific types: import { User, Department } from '@/types/user.types'
+ * 2. For all types:     import * as Types from '@/types'
+ * 3. From index:        import { User, Department } from '@/types'
+ */
 
-export type ProjectStatus = 'planning' | 'active' | 'completed' | 'on_hold';
+// --- USER & AUTHENTICATION TYPES ---
+export type { UserRole, InvitationStatus } from './user.types';
+export type { User, Invitation, Department } from './user.types';
 
-export type TaskStatus = 'todo' | 'in_progress' | 'review' | 'done';
+// --- PROJECT TYPES ---
+export type { ProjectStatus } from './project.types';
+export type { Project } from './project.types';
 
-export type Priority = 'low' | 'medium' | 'high';
+// --- TASK TYPES ---
+export type { TaskStatus, TaskPriority, Priority, ReviewStatus } from './task.types';
+export type { Attachment, Subtask, ExecutionResult, Task } from './task.types';
 
-// --- 2. CORE INTERFACES ---
+// --- COMMUNICATION TYPES ---
+export type { NotificationType } from './communication.types';
+export type { Comment, Notification, LastMessage, Conversation, Message } from './communication.types';
 
-export interface User {
-  id: string;
-  full_name: string;
-  email: string;
-  avatar?: string;
-  role?: string;
-}
+// --- ACTIVITY LOG TYPES ---
+export type { ActivityTargetType } from './activity.types';
+export type { ActivityLog } from './activity.types';
 
-export interface Department {
-  id: string; // Đổi thành bắt buộc vì khi dùng Map/List luôn cần ID
-  name: string;
-  description?: string;
-  color?: string;
-  member_ids?: string[];
-  created_at?: string;
-}
+// --- API RESPONSE TYPES ---
+export type { ApiResponse, PaginatedResponse, KanbanResponse } from './api.types';
 
-export interface Project {
-  id: string; 
-  name: string;
-  description?: string;
-  color?: string;
-  status: ProjectStatus;
-  progress: number;
-  start_date?: string;
-  end_date?: string;
-  department_id?: string;
-  member_ids?: string[];
-}
-
-export interface Subtask {
-  id: string;
-  title: string;
-  done: boolean;
-}
-
-export interface Task {
-  id: string; 
-  title: string;
-  description?: string;
-  project_id: string;
-  status: TaskStatus;
-  priority: Priority;
-  assignee_id?: string;
-  reviewer_id?: string;
-  start_date?: string;
-  due_date?: string;
-  subtasks?: Subtask[];
-  attachment_count: number;
-}
-
-export interface TaskComment {
-  id: string;
-  task_id: string;
-  author_id: string;
-  author_name?: string;
-  author_avatar?: string;
-  content: string;
-  created_at?: string;
-  created_date?: string; // Dùng cho hiển thị format
-}
-
-// --- 3. HELPER TYPES (Cho logic UI) ---
-
-// Dùng cho logic kéo thả Gantt Chart
-export interface DraggingState {
-  taskId: string;
-  startX: number;
-  origStartDate: string;
-  origDueDate: string;
-  deltaDays?: number;
-}
-
-// Dùng cho AppContext để fix lỗi "Type never"
-export interface AppContextType {
-  sidebarCollapsed: boolean;
-  toggleSidebar: () => void;
-  departments: Department[];
-  projects: Project[];
-  addProject: (project: any) => void;
-}
+// --- UI HELPER TYPES ---
+export type { TaskComment, DraggingState, AppContextType } from './ui.types';

@@ -19,6 +19,7 @@ const PRIORITY_CONFIG: Record<Priority, { label: string; color: string; bg: stri
   low: { label: 'Thấp', color: 'text-slate-600', bg: 'bg-slate-100' },
   medium: { label: 'Trung bình', color: 'text-amber-600', bg: 'bg-amber-100' },
   high: { label: 'Cao', color: 'text-rose-600', bg: 'bg-rose-100' },
+  urgent: { label: 'Khan cap', color: 'text-red-700', bg: 'bg-red-100' },
 };
 
 export default function TaskCard({ task, users = [], onClick, isDragging }: TaskCardProps) {
@@ -29,6 +30,9 @@ export default function TaskCard({ task, users = [], onClick, isDragging }: Task
 
   const assignee = task.assignee_id ? userMap[task.assignee_id] : null;
   const priority = PRIORITY_CONFIG[task.priority as Priority] || PRIORITY_CONFIG.medium;
+  const subtasks = task.subtasks || [];
+  const completedSubtasks = subtasks.filter((subtask) => subtask.done || subtask.is_completed).length;
+  const subtaskPercent = subtasks.length > 0 ? Math.round((completedSubtasks / subtasks.length) * 100) : 0;
   
   const isOverdue = useMemo(() => {
     if (!task.due_date || task.status === 'done') return false;
@@ -64,6 +68,18 @@ export default function TaskCard({ task, users = [], onClick, isDragging }: Task
       <h4 className="text-sm font-semibold text-foreground mb-3 leading-snug line-clamp-2 group-hover:text-primary transition-colors">
         {task.title}
       </h4>
+
+      {subtasks.length > 0 && (
+        <div className="mb-3">
+          <div className="mb-1 flex items-center justify-between text-[10px] text-muted-foreground">
+            <span>{completedSubtasks}/{subtasks.length} hoan thanh</span>
+            <span>{subtaskPercent}%</span>
+          </div>
+          <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
+            <div className="h-full bg-emerald-500 transition-all" style={{ width: `${subtaskPercent}%` }} />
+          </div>
+        </div>
+      )}
 
       <div className="flex items-center justify-between mt-3 pt-3 border-t border-border/50">
         <div className="flex items-center gap-2">

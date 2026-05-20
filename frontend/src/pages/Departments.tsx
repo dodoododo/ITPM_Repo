@@ -1,212 +1,386 @@
-import { useState } from 'react';
-import { Link } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-// Import Type chuẩn từ file index.ts của bạn
-import { type Department, type User, type Project } from '@/types';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { useEffect, useMemo, useState } from 'react';
+import { AlertCircle, Pencil, Plus, Search, Trash2, Users } from 'lucide-react';
+import { useAuth } from '@/hooks/useAuth';
+import { departmentService } from '@/services/departmentService';
+import { userService } from '@/services/userService';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
-import { Label } from '@/components/ui/label';
-import { Building2, Users, FolderKanban, Plus, Loader2 } from 'lucide-react';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import type { Department, User } from '@/types';
 
-const DEPT_COLORS = ['#2563EB', '#7C3AED', '#059669', '#DC2626', '#D97706'];
+const getUserId = (user: User | string) => (typeof user === 'string' ? user : user._id || user.id || '');
 
-// --- 1. Mock Data (Thay thế API thật) ---
-const MOCK_DEPTS: Department[] = [
-  { id: 'd1', name: 'Phòng Kỹ Thuật', description: 'Phát triển lõi AI và OCR', color: '#2563EB', member_ids: ['u1', 'u2'] },
-  { id: 'd2', name: 'Ban Giám Đốc', description: 'Quản lý chiến lược', color: '#DC2626', member_ids: ['u1'] },
-];
+const getDepartmentId = (department: Department) => department._id || department.id || '';
 
-const MOCK_USERS: User[] = [
-  { id: 'u1', full_name: 'Tăng Ngọc Hậu', email: 'hau@itpm.pro', avatar: '' },
-  { id: 'u2', full_name: 'Nguyễn Văn A', email: 'vana@itpm.pro', avatar: '' },
-];
+const normalizeDepartment = (department: Department): Department => ({
+  ...department,
+  member_count: department.member_count ?? department.member_ids?.length ?? 0,
+});
 
-const MOCK_PROJECTS: Project[] = [
-  { id: 'p1', name: 'ITPM Workflow', department_id: 'd1', status: 'active', progress: 45, color: '#2563EB' },
-];
+export const DepartmentsPage = () => {
+  const { token } = useAuth();
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState('');
 
-// --- 2. Interface cho Modal Props ---
-interface CreateDeptModalProps {
-  open: boolean;
-  onClose: () => void;
-}
+  const [showDepartmentDialog, setShowDepartmentDialog] = useState(false);
+  const [editingDepartment, setEditingDepartment] = useState<Department | null>(null);
+  const [departmentName, setDepartmentName] = useState('');
+  const [departmentDescription, setDepartmentDescription] = useState('');
+  const [departmentColor, setDepartmentColor] = useState('#2563EB');
 
-interface DeptForm {
-  name: string;
-  description: string;
-  color: string;
-  member_ids: string[];
-}
+  const [memberDepartment, setMemberDepartment] = useState<Department | null>(null);
+  const [memberSearch, setMemberSearch] = useState('');
+  const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
 
-function CreateDeptModal({ open, onClose }: CreateDeptModalProps) {
-  const qc = useQueryClient();
-  const [form, setForm] = useState<DeptForm>({ 
-    name: '', 
-    description: '', 
-    color: DEPT_COLORS[0], 
-    member_ids: [] 
-  });
+  useEffect(() => {
+    void loadData();
+  }, [token]);
 
-  const set = (k: keyof DeptForm, v: any) => setForm(p => ({ ...p, [k]: v }));
+  const loadData = async () => {
+    if (!token) return;
 
-  const mutation = useMutation({
-    mutationFn: async (data: DeptForm) => {
-      console.log("Mock Create Dept:", data);
-      await new Promise(resolve => setTimeout(resolve, 800));
-      return { id: Math.random().toString(), ...data };
-    },
-    onSuccess: () => { 
-      qc.invalidateQueries({ queryKey: ['departments'] }); 
-      onClose(); 
-      setForm({ name: '', description: '', color: DEPT_COLORS[0], member_ids: [] }); 
-    },
-  });
+    try {
+      setIsLoading(true);
+      setError('');
+      const [departmentResponse, userResponse] = await Promise.all([
+        departmentService.getDepartments(token),
+        userService.getUsers(token),
+      ]);
+
+      setDepartments((departmentResponse.data || []).map(normalizeDepartment));
+      setUsers(userResponse.data || []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load departments');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const openCreateDialog = () => {
+    setEditingDepartment(null);
+    setDepartmentName('');
+    setDepartmentDescription('');
+    setDepartmentColor('#2563EB');
+    setShowDepartmentDialog(true);
+  };
+
+  const openEditDialog = (department: Department) => {
+    setEditingDepartment(department);
+    setDepartmentName(department.name);
+    setDepartmentDescription(department.description || '');
+    setDepartmentColor(department.color || '#2563EB');
+    setShowDepartmentDialog(true);
+  };
+
+  const handleSaveDepartment = async () => {
+    if (!departmentName.trim() || !token) return;
+
+    try {
+      setError('');
+      const payload = {
+        name: departmentName.trim(),
+        description: departmentDescription.trim(),
+        color: departmentColor,
+      };
+
+      const response = editingDepartment
+        ? await departmentService.updateDepartment(getDepartmentId(editingDepartment), payload, token)
+        : await departmentService.createDepartment(payload, token);
+
+      if (!response.success || !response.data) {
+        throw new Error(response.message || 'Failed to save department');
+      }
+
+      const savedDepartment = normalizeDepartment(response.data);
+      setDepartments((current) => {
+        if (!editingDepartment) return [savedDepartment, ...current];
+        const editingId = getDepartmentId(editingDepartment);
+        return current.map((department) => (
+          getDepartmentId(department) === editingId ? savedDepartment : department
+        ));
+      });
+      setShowDepartmentDialog(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save department');
+    }
+  };
+
+  const handleDeleteDepartment = async (department: Department) => {
+    if (!token || !confirm('Ban chac chan muon xoa phong ban nay?')) return;
+
+    try {
+      const departmentId = getDepartmentId(department);
+      await departmentService.deleteDepartment(departmentId, token);
+      setDepartments((current) => current.filter((item) => getDepartmentId(item) !== departmentId));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete department');
+    }
+  };
+
+  const openMemberDialog = (department: Department) => {
+    setMemberDepartment(department);
+    setMemberSearch('');
+    setSelectedUserIds([]);
+  };
+
+  const activeMemberIds = useMemo(() => {
+    if (!memberDepartment?.member_ids) return new Set<string>();
+    return new Set(memberDepartment.member_ids.map(getUserId));
+  }, [memberDepartment]);
+
+  const memberUsers = useMemo(() => {
+    if (!memberDepartment?.member_ids) return [];
+    return memberDepartment.member_ids.filter((member): member is User => typeof member !== 'string');
+  }, [memberDepartment]);
+
+  const availableUsers = useMemo(() => {
+    const keyword = memberSearch.trim().toLowerCase();
+    return users.filter((user) => {
+      const userId = getUserId(user);
+      const matchesSearch = !keyword
+        || user.full_name.toLowerCase().includes(keyword)
+        || user.email.toLowerCase().includes(keyword);
+      return matchesSearch && !activeMemberIds.has(userId);
+    });
+  }, [users, memberSearch, activeMemberIds]);
+
+  const updateDepartmentInState = (department: Department) => {
+    const normalized = normalizeDepartment(department);
+    setDepartments((current) => current.map((item) => (
+      getDepartmentId(item) === getDepartmentId(normalized) ? normalized : item
+    )));
+    setMemberDepartment(normalized);
+  };
+
+  const handleAddMembers = async () => {
+    if (!token || !memberDepartment || selectedUserIds.length === 0) return;
+
+    try {
+      const response = await departmentService.addMembers(
+        getDepartmentId(memberDepartment),
+        selectedUserIds,
+        token
+      );
+
+      if (response.data) {
+        updateDepartmentInState(response.data);
+      }
+      setSelectedUserIds([]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to add members');
+    }
+  };
+
+  const handleRemoveMember = async (userId: string) => {
+    if (!token || !memberDepartment) return;
+
+    try {
+      const response = await departmentService.removeMember(getDepartmentId(memberDepartment), userId, token);
+      if (response.data) {
+        updateDepartmentInState(response.data);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to remove member');
+    }
+  };
+
+  const toggleSelectedUser = (userId: string, checked: boolean) => {
+    setSelectedUserIds((current) => {
+      if (checked) return [...new Set([...current, userId])];
+      return current.filter((id) => id !== userId);
+    });
+  };
 
   return (
-    <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-sm">
-        <DialogHeader><DialogTitle>Tạo phòng ban mới</DialogTitle></DialogHeader>
-        <div className="space-y-4">
-          <div>
-            <Label>Tên phòng ban *</Label>
-            <Input value={form.name} onChange={e => set('name', e.target.value)} placeholder="Nhập tên..." />
-          </div>
-          <div>
-            <Label>Mô tả</Label>
-            <Textarea value={form.description} onChange={e => set('description', e.target.value)} rows={2} placeholder="Mô tả ngắn..." />
-          </div>
-          <div>
-            <Label>Màu sắc đại diện</Label>
-            <div className="flex gap-2 mt-2">
-              {DEPT_COLORS.map(c => (
-                <button 
-                  key={c} 
-                  type="button" 
-                  onClick={() => set('color', c)}
-                  className="w-7 h-7 rounded-full transition-all hover:scale-110 shadow-sm"
-                  style={{ 
-                    backgroundColor: c, 
-                    outline: form.color === c ? `2px solid ${c}` : 'none', 
-                    outlineOffset: '2px',
-                    opacity: form.color === c ? 1 : 0.6
-                  }} 
-                />
-              ))}
-            </div>
-          </div>
-        </div>
-        <DialogFooter className="mt-4">
-          <Button variant="outline" onClick={onClose}>Hủy</Button>
-          <Button disabled={!form.name || mutation.isPending} onClick={() => mutation.mutate(form)}>
-            {mutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Tạo phòng ban'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-export default function Departments() {
-  const [showCreate, setShowCreate] = useState(false);
-
-  // Queries dùng Mock Data
-  const { data: departments = [], isLoading } = useQuery<Department[]>({ 
-    queryKey: ['departments'], 
-    queryFn: async () => MOCK_DEPTS 
-  });
-  
-  const { data: users = [] } = useQuery<User[]>({ 
-    queryKey: ['users'], 
-    queryFn: async () => MOCK_USERS, 
-    staleTime: 5 * 60 * 1000 
-  });
-
-  const { data: projects = [] } = useQuery<Project[]>({ 
-    queryKey: ['projects'], 
-    queryFn: async () => MOCK_PROJECTS 
-  });
-
-  return (
-    <div className="space-y-6 pb-10">
-      <div className="flex items-center justify-between">
+    <div className="space-y-6">
+      <div className="flex justify-between items-center gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-foreground tracking-tight">Cơ cấu Phòng ban</h1>
-          <p className="text-sm text-muted-foreground mt-1 font-medium">Quản lý sơ đồ tổ chức và nhân sự trực thuộc.</p>
+          <h1 className="text-3xl font-bold text-gray-900">Quan ly phong ban</h1>
+          <p className="text-gray-600 mt-1">Tao phong ban, chinh sua thong tin va quan ly thanh vien.</p>
         </div>
-        <Button onClick={() => setShowCreate(true)} className="gap-2 shadow-sm font-bold">
-          <Plus className="w-4 h-4" /> Tạo phòng ban
+        <Button onClick={openCreateDialog} className="gap-2">
+          <Plus className="w-4 h-4" />
+          Tao phong ban
         </Button>
       </div>
 
+      {error && (
+        <div className="p-4 bg-red-50 border border-red-200 rounded-lg flex items-center gap-2 text-red-700">
+          <AlertCircle className="w-5 h-5" />
+          <span>{error}</span>
+        </div>
+      )}
+
       {isLoading ? (
-        <div className="flex items-center justify-center py-32">
-          <Loader2 className="w-8 h-8 animate-spin text-primary" />
-        </div>
+        <div className="text-center py-12 text-gray-600">Dang tai...</div>
+      ) : departments.length === 0 ? (
+        <Card>
+          <CardContent className="text-center py-12 text-gray-600">
+            Chua co phong ban nao.
+          </CardContent>
+        </Card>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-          {departments.map((dept: Department) => {
-            const members = users.filter((u: User) => dept.member_ids?.includes(u.id));
-            const deptProjects = projects.filter((p: Project) => p.department_id === dept.id);
-
-            return (
-              <Link key={dept.id} to={`/departments/${dept.id}`}
-                className="bg-card rounded-xl border border-border overflow-hidden hover:shadow-lg hover:border-primary/30 transition-all duration-300 block group">
-                <div className="p-6 pb-4">
-                  <div className="flex items-center gap-4 mb-4">
-                    <div className="w-12 h-12 rounded-xl flex items-center justify-center shadow-inner" 
-                      style={{ backgroundColor: (dept.color || '#2563EB') + '15' }}>
-                      <Building2 className="w-6 h-6" style={{ color: dept.color || '#2563EB' }} />
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {departments.map((department) => (
+            <Card key={getDepartmentId(department)} className="hover:shadow-md transition">
+              <CardHeader className="pb-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <div className="w-4 h-4 rounded-full flex-shrink-0" style={{ backgroundColor: department.color }} />
+                      <CardTitle className="text-lg truncate">{department.name}</CardTitle>
                     </div>
-                    <div>
-                      <h3 className="text-lg font-bold text-foreground group-hover:text-primary transition-colors">{dept.name}</h3>
-                      <p className="text-xs text-muted-foreground line-clamp-1">{dept.description || 'Không có mô tả'}</p>
-                    </div>
+                    {department.description && (
+                      <CardDescription className="mt-2 line-clamp-2">{department.description}</CardDescription>
+                    )}
                   </div>
-                  <div className="flex items-center gap-4 text-xs font-bold text-muted-foreground uppercase tracking-wider">
-                    <span className="flex items-center gap-1.5"><Users className="w-3.5 h-3.5" />{members.length} Người</span>
-                    <span className="flex items-center gap-1.5"><FolderKanban className="w-3.5 h-3.5" />{deptProjects.length} Dự án</span>
-                  </div>
-                </div>
-
-                {/* Avatar stack */}
-                <div className="border-t border-border/50 px-6 py-4 bg-accent/5">
-                  <div className="flex items-center justify-between">
-                    <div className="flex -space-x-2.5">
-                      {members.slice(0, 5).map((m: User) => (
-                        <Avatar key={m.id} className="h-8 w-8 border-2 border-card ring-1 ring-border shadow-sm">
-                          <AvatarImage src={m.avatar} />
-                          <AvatarFallback className="text-[10px] font-bold">{m.full_name?.[0]}</AvatarFallback>
-                        </Avatar>
-                      ))}
-                      {members.length > 5 && (
-                        <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center border-2 border-card text-[10px] font-bold text-muted-foreground">
-                          +{members.length - 5}
-                        </div>
-                      )}
-                      {members.length === 0 && <span className="text-[10px] italic text-muted-foreground/60 font-medium tracking-normal">Chưa có nhân sự</span>}
-                    </div>
-                    <span className="text-[10px] font-bold text-primary opacity-0 group-hover:opacity-100 transition-opacity uppercase">Chi tiết →</span>
+                  <div className="flex items-center gap-1">
+                    <Button variant="ghost" size="icon" onClick={() => openEditDialog(department)}>
+                      <Pencil className="w-4 h-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => handleDeleteDepartment(department)}
+                      className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
                   </div>
                 </div>
-              </Link>
-            );
-          })}
+              </CardHeader>
+
+              <CardContent className="space-y-4">
+                <div className="flex items-center gap-2 text-sm">
+                  <Users className="w-4 h-4 text-gray-600" />
+                  <span className="text-gray-700">{department.member_count || 0} thanh vien</span>
+                </div>
+
+                <Button variant="outline" className="w-full gap-2" onClick={() => openMemberDialog(department)}>
+                  <Users className="w-4 h-4" />
+                  Quan ly thanh vien
+                </Button>
+              </CardContent>
+            </Card>
+          ))}
         </div>
       )}
 
-      {/* Hiển thị khi không có data */}
-      {!isLoading && departments.length === 0 && (
-        <div className="flex flex-col items-center justify-center py-32 bg-accent/10 rounded-2xl border-2 border-dashed border-border">
-          <Building2 className="w-12 h-12 mb-4 text-muted-foreground/30" />
-          <p className="text-sm font-bold text-muted-foreground uppercase tracking-widest">Hệ thống chưa có phòng ban</p>
-          <Button variant="link" onClick={() => setShowCreate(true)} className="mt-2 text-primary">Tạo ngay phòng ban đầu tiên</Button>
-        </div>
-      )}
+      <Dialog open={showDepartmentDialog} onOpenChange={setShowDepartmentDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{editingDepartment ? 'Chinh sua phong ban' : 'Tao phong ban'}</DialogTitle>
+            <DialogDescription>Cap nhat ten, mo ta va mau hien thi cua phong ban.</DialogDescription>
+          </DialogHeader>
 
-      <CreateDeptModal open={showCreate} onClose={() => setShowCreate(false)} />
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium mb-1">Ten phong ban</label>
+              <Input value={departmentName} onChange={(event) => setDepartmentName(event.target.value)} />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Mo ta</label>
+              <Input value={departmentDescription} onChange={(event) => setDepartmentDescription(event.target.value)} />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Mau sac</label>
+              <div className="flex items-center gap-3">
+                <input
+                  type="color"
+                  value={departmentColor}
+                  onChange={(event) => setDepartmentColor(event.target.value)}
+                  className="w-12 h-10 rounded cursor-pointer"
+                />
+                <span className="text-sm text-gray-600">{departmentColor}</span>
+              </div>
+            </div>
+            <div className="flex gap-2 justify-end">
+              <Button variant="outline" onClick={() => setShowDepartmentDialog(false)}>Huy</Button>
+              <Button onClick={handleSaveDepartment} disabled={!departmentName.trim()}>
+                {editingDepartment ? 'Luu thay doi' : 'Tao phong ban'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(memberDepartment)} onOpenChange={(open) => !open && setMemberDepartment(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Thanh vien phong ban</DialogTitle>
+            <DialogDescription>{memberDepartment?.name}</DialogDescription>
+          </DialogHeader>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <Users className="w-4 h-4" />
+                Dang trong phong ({memberUsers.length})
+              </div>
+              <div className="border rounded-lg divide-y max-h-80 overflow-auto">
+                {memberUsers.length === 0 ? (
+                  <div className="p-4 text-sm text-gray-500">Chua co thanh vien.</div>
+                ) : memberUsers.map((user) => (
+                  <div key={getUserId(user)} className="flex items-center justify-between gap-3 p-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium truncate">{user.full_name}</p>
+                      <p className="text-xs text-gray-500 truncate">{user.email}</p>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => handleRemoveMember(getUserId(user))}
+                      className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+                <Input
+                  placeholder="Tim nhan su..."
+                  value={memberSearch}
+                  onChange={(event) => setMemberSearch(event.target.value)}
+                  className="pl-9"
+                />
+              </div>
+              <div className="border rounded-lg divide-y max-h-80 overflow-auto">
+                {availableUsers.length === 0 ? (
+                  <div className="p-4 text-sm text-gray-500">Khong co nhan su phu hop.</div>
+                ) : availableUsers.map((user) => {
+                  const userId = getUserId(user);
+                  return (
+                    <label key={userId} className="flex items-center gap-3 p-3 cursor-pointer hover:bg-gray-50">
+                      <Checkbox
+                        checked={selectedUserIds.includes(userId)}
+                        onCheckedChange={(checked) => toggleSelectedUser(userId, checked === true)}
+                      />
+                      <span className="min-w-0">
+                        <span className="block text-sm font-medium truncate">{user.full_name}</span>
+                        <span className="block text-xs text-gray-500 truncate">{user.email}</span>
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+              <Button onClick={handleAddMembers} disabled={selectedUserIds.length === 0} className="w-full">
+                Them {selectedUserIds.length > 0 ? selectedUserIds.length : ''} thanh vien
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
-}
+};
+
+export default DepartmentsPage;

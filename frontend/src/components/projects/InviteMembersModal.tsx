@@ -45,7 +45,10 @@ const MOCK_DEPARTMENTS: Department[] = [
 
 export default function InviteMembersModal({ open, onClose, project }: InviteMembersModalProps) {
   const qc = useQueryClient();
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set(project?.member_ids || []));
+  const initialMemberIds = (project?.member_ids || [])
+    .map((member) => (typeof member === 'string' ? member : member._id || member.id || ''))
+    .filter(Boolean);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set(initialMemberIds));
   const [selectedDept, setSelectedDept] = useState('');
 
   // Thay thế base44 bằng mock query

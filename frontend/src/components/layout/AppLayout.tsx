@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Outlet } from 'react-router-dom';
 import { useAppContext } from '@/lib/AppContext.tsx';
 import Sidebar from './Sidebar.tsx';

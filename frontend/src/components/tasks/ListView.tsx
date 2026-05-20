@@ -26,6 +26,7 @@ const PRIORITY_CONFIG: Record<Priority, { label: string; color: string }> = {
   low: { label: 'Thấp', color: 'text-slate-500' },
   medium: { label: 'Trung bình', color: 'text-amber-600' },
   high: { label: 'Cao', color: 'text-rose-600' },
+  urgent: { label: 'Khan cap', color: 'text-red-700' },
 };
 
 export default function ListView({ projectId, tasks = [], users = [] }: ListViewProps) {

@@ -1,7 +1,7 @@
-import { createContext, useState, useContext, useEffect, type ReactNode } from 'react';
-import { type User } from '@/types'; // Import interface User từ file index.ts đã tạo
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { authService } from '@/services/authService';
+import { type User } from '@/types';
 
-// --- Interface cho Context ---
 interface AuthError {
   type: string;
   message: string;
@@ -9,13 +9,17 @@ interface AuthError {
 
 interface AuthContextType {
   user: User | null;
+  token: string | null;
   isAuthenticated: boolean;
+  isLoading: boolean;
   isLoadingAuth: boolean;
   isLoadingPublicSettings: boolean;
   authError: AuthError | null;
-  appPublicSettings: any;
+  appPublicSettings: Record<string, unknown> | null;
   authChecked: boolean;
+  login: (email: string, password: string) => Promise<void>;
   logout: (shouldRedirect?: boolean) => void;
+  setAuthData: (user: User, token: string) => void;
   navigateToLogin: () => void;
   checkUserAuth: () => Promise<void>;
   checkAppState: () => Promise<void>;
@@ -23,88 +27,98 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// --- Mock Data ---
-const MOCK_USER: User = {
-  id: 'u1',
-  full_name: 'Tăng Ngọc Hậu',
-  email: 'hau@itpm.pro',
-  avatar: '',
-  role: 'Administrator'
-};
-
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [token, setToken] = useState<string | null>(null);
   const [isLoadingAuth, setIsLoadingAuth] = useState(true);
-  const [isLoadingPublicSettings, setIsLoadingPublicSettings] = useState(true);
   const [authError, setAuthError] = useState<AuthError | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
-  const [appPublicSettings, setAppPublicSettings] = useState<any>(null);
+  const [appPublicSettings, setAppPublicSettings] = useState<Record<string, unknown> | null>(null);
+
+  const isAuthenticated = Boolean(token && user);
+  const isLoadingPublicSettings = false;
+  const isLoading = isLoadingAuth;
 
   useEffect(() => {
-    checkAppState();
+    void checkAppState();
   }, []);
 
-  const checkAppState = async () => {
-    try {
-      setIsLoadingPublicSettings(true);
-      // Giả lập load settings ứng dụng
-      await new Promise(r => setTimeout(r, 500));
-      setAppPublicSettings({ id: 'app-itpm', public_settings: {} });
-      
-      // Giả lập tự động đăng nhập luôn để Hậu làm UI cho sướng
-      await checkUserAuth();
-      
-      setIsLoadingPublicSettings(false);
-    } catch (error: any) {
-      setAuthError({ type: 'unknown', message: error.message });
-      setIsLoadingPublicSettings(false);
-    }
+  const setAuthData = (nextUser: User, nextToken: string) => {
+    authService.setToken(nextToken);
+    authService.setCurrentUser(nextUser);
+    setUser(nextUser);
+    setToken(nextToken);
+    setAuthError(null);
   };
 
   const checkUserAuth = async () => {
-    try {
-      setIsLoadingAuth(true);
-      // Giả lập API check Me
-      await new Promise(r => setTimeout(r, 600));
-      setUser(MOCK_USER);
-      setIsAuthenticated(true);
-      setIsLoadingAuth(false);
-      setAuthChecked(true);
-    } catch (error: any) {
-      setIsLoadingAuth(false);
-      setIsAuthenticated(false);
-      setAuthChecked(true);
+    setIsLoadingAuth(true);
+    const savedToken = authService.getToken();
+    const savedUser = authService.getCurrentUser();
+
+    if (savedToken && savedUser) {
+      setToken(savedToken);
+      setUser(savedUser);
+      setAuthError(null);
+    } else {
+      setToken(null);
+      setUser(null);
+      setAuthError({ type: 'auth_required', message: 'Authentication required' });
     }
+
+    setAuthChecked(true);
+    setIsLoadingAuth(false);
+  };
+
+  const checkAppState = async () => {
+    setAppPublicSettings({ appName: import.meta.env.VITE_APP_NAME || 'ITPM' });
+    await checkUserAuth();
+  };
+
+  const login = async (email: string, password: string) => {
+    const response = await authService.login({ email, password });
+
+    if (!response.success || !response.data) {
+      throw new Error(response.message || 'Login failed');
+    }
+
+    setAuthData(response.data.user, response.data.token);
   };
 
   const logout = (shouldRedirect = true) => {
-    console.log("Mock Logout");
+    authService.clearToken();
     setUser(null);
-    setIsAuthenticated(false);
+    setToken(null);
+    setAuthError({ type: 'auth_required', message: 'Authentication required' });
+
+    if (shouldRedirect) {
+      window.location.assign('/login');
+    }
   };
 
   const navigateToLogin = () => {
-    console.log("Mock Redirect to Login");
+    window.location.assign('/login');
   };
 
-  return (
-    <AuthContext.Provider value={{ 
-      user, 
-      isAuthenticated, 
-      isLoadingAuth,
-      isLoadingPublicSettings,
-      authError,
-      appPublicSettings,
-      authChecked,
-      logout,
-      navigateToLogin,
-      checkUserAuth,
-      checkAppState
-    }}>
-      {children}
-    </AuthContext.Provider>
-  );
+  const value = useMemo<AuthContextType>(() => ({
+    user,
+    token,
+    isAuthenticated,
+    isLoading,
+    isLoadingAuth,
+    isLoadingPublicSettings,
+    authError,
+    appPublicSettings,
+    authChecked,
+    login,
+    logout,
+    setAuthData,
+    navigateToLogin,
+    checkUserAuth,
+    checkAppState,
+  }), [user, token, isAuthenticated, isLoading, isLoadingAuth, authError, appPublicSettings, authChecked]);
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
 
 export const useAuth = () => {
