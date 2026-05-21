@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { authService } from '@/services/authService';
+import { authService, type LoginResponse } from '@/services/authService';
 import { type User } from '@/types';
 
 interface AuthError {
@@ -17,7 +17,7 @@ interface AuthContextType {
   authError: AuthError | null;
   appPublicSettings: Record<string, unknown> | null;
   authChecked: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<LoginResponse>;
   logout: (shouldRedirect?: boolean) => void;
   setAuthData: (user: User, token: string) => void;
   navigateToLogin: () => void;
@@ -75,14 +75,23 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     await checkUserAuth();
   };
 
-  const login = async (email: string, password: string) => {
+  const login = async (email: string, password: string): Promise<LoginResponse> => {
     const response = await authService.login({ email, password });
 
     if (!response.success || !response.data) {
       throw new Error(response.message || 'Login failed');
     }
 
+    if (response.data.requiresPasswordChange) {
+      return response.data;
+    }
+
+    if (!response.data.token) {
+      throw new Error('Login did not return a session token');
+    }
+
     setAuthData(response.data.user, response.data.token);
+    return response.data;
   };
 
   const logout = (shouldRedirect = true) => {

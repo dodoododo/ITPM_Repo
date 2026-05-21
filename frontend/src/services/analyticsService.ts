@@ -13,6 +13,7 @@ export interface AnalyticsSummary {
   done: number;
   in_progress: number;
   review: number;
+  needs_revision: number;
   todo: number;
   overdue: number;
   kpi: number;
@@ -63,6 +64,7 @@ export const analyticsService = {
       done: 0,
       in_progress: 0,
       review: 0,
+      needs_revision: 0,
       todo: 0,
       overdue: 0,
       kpi: 0,

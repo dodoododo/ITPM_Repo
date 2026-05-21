@@ -1,21 +1,27 @@
-/**
- * User & Authentication Types
- * Phân hệ: NHÂN SỰ & PHÂN QUYỀN
- */
-
 export type UserRole = 'admin' | 'manager' | 'employee' | 'Administrator' | 'Leader' | 'Developer' | 'Designer';
 export type InvitationStatus = 'pending' | 'accepted' | 'expired';
+export type AccountStatus = 'pending' | 'active' | 'locked' | 'disabled';
 
 export interface User {
   _id?: string;
   id: string;
   full_name: string;
   email: string;
-  password?: string; // Không truyền qua API response
+  company_email?: string;
+  notification_email?: string;
+  password?: string;
   avatar?: string;
   role?: UserRole;
   isActive?: boolean;
+  account_status?: AccountStatus;
   invitationStatus?: InvitationStatus;
+  hasChangedPassword?: boolean;
+  mustChangePassword?: boolean;
+  department_id?: string | Department;
+  position_title?: string;
+  manager_id?: string | User;
+  created_by?: string | User;
+  lastLoginAt?: string;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -26,7 +32,11 @@ export interface Invitation {
   email: string;
   token: string;
   role: UserRole;
-  department_id?: string;
+  department_id?: string | Department;
+  user_id?: string | User;
+  created_by?: string | User;
+  sentAt?: string;
+  lastSendError?: string;
   status: InvitationStatus;
   expiresAt: string;
   createdAt?: string;
@@ -37,8 +47,11 @@ export interface Department {
   _id?: string;
   id: string;
   name: string;
+  code?: string;
   description?: string;
   color?: string;
+  manager_id?: string | User;
+  managerId?: string | User;
   member_ids?: Array<string | User>;
   member_count?: number;
   members?: User[];

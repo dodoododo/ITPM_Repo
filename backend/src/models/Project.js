@@ -5,6 +5,7 @@ const projectSchema = new mongoose.Schema({
   description: { type: String, default: '' },
   color: { type: String, default: '#059669' },
   status: { type: String, enum: ['planning', 'active', 'on_hold', 'completed'], default: 'planning' },
+  visibility: { type: String, enum: ['public', 'private'], default: 'private' },
   progress: { type: Number, default: 0, min: 0, max: 100 },
   start_date: { type: Date },
   end_date: { type: Date },
@@ -15,4 +16,5 @@ const projectSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 projectSchema.index({ department_id: 1 });
+projectSchema.index({ visibility: 1 });
 module.exports = mongoose.model('Project', projectSchema);

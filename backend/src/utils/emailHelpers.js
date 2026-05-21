@@ -1,87 +1,166 @@
-/**
- * EMAIL HELPERS
- * Gửi email sử dụng Nodemailer
- * 
- * NOTE: Cần setup Nodemailer config với SMTP credentials
- * Hiện tại mới là skeleton, cần điền SMTP config vào .env
- */
-
 const nodemailer = require('nodemailer');
 
-/**
- * Tạo transporter Nodemailer
- * Sửa lại với SMTP config thực tế của công ty
- */
+const escapeHtml = (value = '') =>
+  String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
+const getMailConfigStatus = () => {
+  const missing = [];
+  if (!process.env.SMTP_HOST) missing.push('SMTP_HOST');
+  if (!process.env.SMTP_PORT) missing.push('SMTP_PORT');
+  if (!process.env.SMTP_USER) missing.push('SMTP_USER');
+  if (!process.env.SMTP_PASS) missing.push('SMTP_PASS');
+  if (!process.env.SMTP_FROM) missing.push('SMTP_FROM');
+
+  return {
+    configured: missing.length === 0,
+    missing,
+    provider: process.env.MAIL_PROVIDER || 'smtp',
+    from: process.env.SMTP_FROM || '',
+  };
+};
+
+const createMailConfigError = () => {
+  const status = getMailConfigStatus();
+  const error = new Error(`Mail provider is not configured. Missing: ${status.missing.join(', ')}`);
+  error.code = 'MAIL_NOT_CONFIGURED';
+  error.statusCode = 503;
+  error.details = status;
+  return error;
+};
+
 const createTransporter = () => {
+  const status = getMailConfigStatus();
+  if (!status.configured) {
+    throw createMailConfigError();
+  }
+
   return nodemailer.createTransport({
-    host: process.env.SMTP_HOST || 'smtp.gmail.com',
-    port: process.env.SMTP_PORT || 587,
-    secure: false, // true for 465, false for other ports
+    host: process.env.SMTP_HOST,
+    port: Number(process.env.SMTP_PORT),
+    secure: process.env.SMTP_SECURE === 'true',
     auth: {
-      user: process.env.SMTP_USER || 'your_email@gmail.com',
-      pass: process.env.SMTP_PASS || 'your_app_password'
-    }
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS,
+    },
   });
 };
 
-/**
- * Gửi email mời nhân sự
- * @param {string} toEmail - Email người nhận
- * @param {string} invitationToken - Token từ database
- * @param {string} invitedByName - Tên người gửi lời mời
- * @returns {Promise<boolean>}
- */
-const sendInvitationEmail = async (toEmail, invitationToken, invitedByName = 'Admin') => {
-  try {
-    const transporter = createTransporter();
+const sendMail = async (mailOptions) => {
+  const transporter = createTransporter();
+  const info = await transporter.sendMail({
+    ...mailOptions,
+    from: process.env.SMTP_FROM,
+  });
 
-    const acceptUrl = `${process.env.FRONTEND_URL}/accept-invite?token=${invitationToken}`;
+  return {
+    messageId: info.messageId,
+    accepted: info.accepted || [],
+    rejected: info.rejected || [],
+  };
+};
 
-    const mailOptions = {
-      from: process.env.SMTP_FROM || process.env.SMTP_USER,
-      to: toEmail,
-      subject: '🎉 Bạn được mời tham gia ITPM Workspace',
-      html: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px;">
-          <h2>Chào mừng bạn đến với ITPM! 👋</h2>
-          <p><strong>${invitedByName}</strong> đã mời bạn tham gia Workspace.</p>
-          
-          <p>Click nút bên dưới để kích hoạt tài khoản:</p>
-          
-          <a href="${acceptUrl}" style="
-            background-color: #3B82F6;
-            color: white;
-            padding: 12px 24px;
-            text-decoration: none;
-            border-radius: 4px;
-            display: inline-block;
-            margin: 20px 0;
-          ">
-            ✨ Kích hoạt Tài khoản
-          </a>
-          
-          <p>Hoặc copy link này vào trình duyệt:</p>
-          <p style="word-break: break-all; color: #666;">${acceptUrl}</p>
-          
-          <p>Link này sẽ hết hạn sau 7 ngày.</p>
-          
-          <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-          <p style="font-size: 12px; color: #999;">
-            Nếu bạn không mong đợi email này, vui lòng bỏ qua.
-          </p>
-        </div>
-      `
-    };
+const sendInvitationEmail = async ({ toEmail, invitationToken, invitedByName = 'Admin', fullName = '' }) => {
+  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const acceptUrl = `${frontendUrl}/accept-invite?token=${encodeURIComponent(invitationToken)}`;
 
-    await transporter.sendMail(mailOptions);
-    console.log(`✅ Invitation email sent to ${toEmail}`);
-    return true;
-  } catch (error) {
-    console.error('❌ Error sending invitation email:', error.message);
-    return false;
-  }
+  const safeEmail = escapeHtml(toEmail);
+  const safeFullName = escapeHtml(fullName || toEmail);
+  const safeInvitedBy = escapeHtml(invitedByName);
+  const safeAcceptUrl = escapeHtml(acceptUrl);
+
+  return sendMail({
+    to: toEmail,
+    subject: 'Activate your ITPM account',
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 620px; margin: 0 auto; color: #111827;">
+        <h1 style="font-size: 24px; margin-bottom: 8px;">Activate your ITPM account</h1>
+        <p style="font-size: 14px; color: #4b5563;">
+          ${safeInvitedBy} created an internal account for ${safeFullName}.
+        </p>
+        <p style="font-size: 14px; color: #4b5563;">
+          Company email: <strong>${safeEmail}</strong>
+        </p>
+        <a href="${safeAcceptUrl}" style="background: #2563eb; color: #ffffff; padding: 12px 18px; border-radius: 6px; display: inline-block; text-decoration: none; font-weight: 700;">
+          Set password and activate
+        </a>
+        <p style="font-size: 12px; color: #6b7280; margin-top: 20px;">
+          This activation link expires. If the button does not work, open this link: ${safeAcceptUrl}
+        </p>
+      </div>
+    `,
+    text: [
+      'Activate your ITPM account',
+      '',
+      `${invitedByName} created an internal account for ${fullName || toEmail}.`,
+      `Company email: ${toEmail}`,
+      `Activation link: ${acceptUrl}`,
+      '',
+      'This activation link expires.',
+    ].join('\n'),
+  });
+};
+
+const sendPasswordResetEmail = async ({ toEmail, resetToken, fullName = '' }) => {
+  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const resetUrl = `${frontendUrl}/reset-password?token=${encodeURIComponent(resetToken)}`;
+  const safeName = escapeHtml(fullName || toEmail);
+  const safeResetUrl = escapeHtml(resetUrl);
+
+  return sendMail({
+    to: toEmail,
+    subject: 'Reset your ITPM password',
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 620px; margin: 0 auto; color: #111827;">
+        <h1 style="font-size: 24px; margin-bottom: 8px;">Reset your password</h1>
+        <p style="font-size: 14px; color: #4b5563;">
+          Hi ${safeName}, use the button below to set a new password.
+        </p>
+        <a href="${safeResetUrl}" style="background: #2563eb; color: #ffffff; padding: 12px 18px; border-radius: 6px; display: inline-block; text-decoration: none; font-weight: 700;">
+          Reset password
+        </a>
+        <p style="font-size: 12px; color: #6b7280; margin-top: 20px;">
+          This link expires soon. If the button does not work, open this link: ${safeResetUrl}
+        </p>
+      </div>
+    `,
+    text: [
+      'Reset your ITPM password',
+      '',
+      `Hi ${fullName || toEmail}, use this link to set a new password:`,
+      resetUrl,
+      '',
+      'This link expires soon.',
+    ].join('\n'),
+  });
+};
+
+const sendTaskReviewEmail = async ({ toEmail, taskTitle, actionUrl, subject, message }) => {
+  if (!toEmail) return null;
+
+  return sendMail({
+    to: toEmail,
+    subject,
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 620px; margin: 0 auto; color: #111827;">
+        <h1 style="font-size: 22px; margin-bottom: 8px;">${escapeHtml(subject)}</h1>
+        <p style="font-size: 14px; color: #4b5563;">${escapeHtml(message || taskTitle)}</p>
+        <a href="${escapeHtml(actionUrl)}" style="background: #2563eb; color: #ffffff; padding: 12px 18px; border-radius: 6px; display: inline-block; text-decoration: none; font-weight: 700;">
+          Open task
+        </a>
+      </div>
+    `,
+    text: [subject, '', message || taskTitle, actionUrl].join('\n'),
+  });
 };
 
 module.exports = {
-  sendInvitationEmail
+  getMailConfigStatus,
+  sendInvitationEmail,
+  sendPasswordResetEmail,
+  sendTaskReviewEmail,
 };

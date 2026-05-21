@@ -1,33 +1,45 @@
-/**
- * LOGIN PAGE
- * Form đăng nhập cơ bản
- */
-
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { AlertCircle } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { AlertCircle } from 'lucide-react';
 
 export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { login } = useAuth();
 
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(searchParams.get('email') || '');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
     setError('');
     setIsLoading(true);
 
     try {
-      await login(email, password);
+      const response = await login(email, password);
+      if (response.requiresPasswordChange) {
+        if (!response.passwordChangeToken) {
+          throw new Error('Password change token is missing');
+        }
+
+        navigate('/change-password', {
+          replace: true,
+          state: {
+            passwordChangeToken: response.passwordChangeToken,
+            email: response.user.email,
+            fullName: response.user.full_name,
+          },
+        });
+        return;
+      }
+
       navigate('/');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed');
@@ -37,11 +49,11 @@ export const LoginPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
+    <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
       <Card className="w-full max-w-md shadow-lg">
         <CardHeader className="space-y-2">
           <CardTitle className="text-2xl">ITPM Login</CardTitle>
-          <CardDescription>Đăng nhập để truy cập hệ thống</CardDescription>
+          <CardDescription>Dang nhap de truy cap he thong quan ly cong viec va KPI.</CardDescription>
         </CardHeader>
 
         <CardContent>
@@ -58,41 +70,37 @@ export const LoginPage: React.FC = () => {
               <Input
                 id="email"
                 type="email"
-                placeholder="your@email.com"
+                placeholder="name@company.com"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(event) => setEmail(event.target.value)}
                 required
                 disabled={isLoading}
               />
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="password">Mật khẩu</Label>
+              <Label htmlFor="password">Mat khau</Label>
               <Input
                 id="password"
                 type="password"
-                placeholder="••••••••"
+                placeholder="********"
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={(event) => setPassword(event.target.value)}
                 required
                 disabled={isLoading}
               />
             </div>
 
-            <Button
-              type="submit"
-              className="w-full"
-              disabled={isLoading}
-            >
-              {isLoading ? 'Đang đăng nhập...' : 'Đăng nhập'}
+            <Button type="submit" className="w-full" disabled={isLoading}>
+              {isLoading ? 'Dang dang nhap...' : 'Dang nhap'}
             </Button>
 
-            <p className="text-center text-sm text-gray-600">
-              Chưa có tài khoản?{' '}
-              <a href="#" className="text-blue-600 hover:underline">
-                Chờ lời mời từ sếp
-              </a>
-            </p>
+            <div className="space-y-2 text-center text-sm text-gray-600">
+              <Link to="/forgot-password" className="font-medium text-blue-600 hover:underline">
+                Quen mat khau?
+              </Link>
+              <p>Chua co tai khoan? Hay lien he admin de nhan email moi kich hoat.</p>
+            </div>
           </form>
         </CardContent>
       </Card>

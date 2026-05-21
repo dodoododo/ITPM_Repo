@@ -3,8 +3,6 @@
  * Dùng cho logic UI components
  */
 
-import type { Department } from './user.types';
-
 export interface TaskComment {
   id: string;
   task_id: string;
@@ -27,7 +25,4 @@ export interface DraggingState {
 export interface AppContextType {
   sidebarCollapsed: boolean;
   toggleSidebar: () => void;
-  departments: Department[];
-  projects: any[];
-  addProject: (project: any) => void;
 }

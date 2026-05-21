@@ -1,42 +1,52 @@
-import { useEffect, useMemo, useState } from 'react';
-import { AlertCircle, CheckCircle, Clock, Mail, ShieldOff } from 'lucide-react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { AlertCircle, CheckCircle2, Edit, Loader2, Lock, Mail, RefreshCcw, RotateCcw, UserPlus } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
-import { authService } from '@/services/authService';
 import { departmentService } from '@/services/departmentService';
-import { userService } from '@/services/userService';
+import { userService, type AdminConfigStatus, type UserPayload } from '@/services/userService';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Switch } from '@/components/ui/switch';
-import type { Department, Invitation, User, UserRole } from '@/types';
+import type { AccountStatus, Department, User, UserRole } from '@/types';
 
-const statusConfig = {
-  pending: { icon: Clock, color: 'text-amber-700', bg: 'bg-amber-50', label: 'Dang cho' },
-  accepted: { icon: CheckCircle, color: 'text-emerald-700', bg: 'bg-emerald-50', label: 'Da tham gia' },
-  expired: { icon: AlertCircle, color: 'text-red-700', bg: 'bg-red-50', label: 'Het han' },
+const getEntityId = (value?: string | { _id?: string; id?: string }) => (
+  typeof value === 'string' ? value : value?._id || value?.id || ''
+);
+
+const statusLabels: Record<AccountStatus, string> = {
+  pending: 'Pending invitation',
+  active: 'Active',
+  locked: 'Locked',
+  disabled: 'Disabled',
+};
+
+const emptyForm: UserPayload = {
+  full_name: '',
+  email: '',
+  notification_email: '',
+  role: 'employee',
+  department_id: '',
+  position_title: '',
+  manager_id: '',
 };
 
 export const InvitationsPage = () => {
-  const { token } = useAuth();
-  const [invitations, setInvitations] = useState<Invitation[]>([]);
-  const [departments, setDepartments] = useState<Department[]>([]);
+  const { token, user } = useAuth();
   const [users, setUsers] = useState<User[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [configStatus, setConfigStatus] = useState<AdminConfigStatus | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [actionUserId, setActionUserId] = useState('');
   const [error, setError] = useState('');
-  const [showInviteDialog, setShowInviteDialog] = useState(false);
-  const [inviteEmail, setInviteEmail] = useState('');
-  const [inviteRole, setInviteRole] = useState<UserRole>('employee');
-  const [inviteDepartmentId, setInviteDepartmentId] = useState('none');
-  const [isSending, setIsSending] = useState(false);
+  const [success, setSuccess] = useState('');
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<AccountStatus | 'all'>('all');
+  const [showDialog, setShowDialog] = useState(false);
+  const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [form, setForm] = useState<UserPayload>(emptyForm);
 
-  const grouped = useMemo(() => ({
-    pending: invitations.filter((item) => item.status === 'pending'),
-    accepted: invitations.filter((item) => item.status === 'accepted'),
-    expired: invitations.filter((item) => item.status === 'expired'),
-  }), [invitations]);
+  const canManage = user?.role === 'admin';
 
   useEffect(() => {
     void loadData();
@@ -48,216 +58,343 @@ export const InvitationsPage = () => {
     try {
       setIsLoading(true);
       setError('');
-      const [invitationResponse, departmentResponse, userResponse] = await Promise.all([
-        authService.getInvitations(token),
-        departmentService.getDepartments(token),
+      const [userResponse, departmentResponse, configResponse] = await Promise.all([
         userService.getUsers(token),
+        departmentService.getDepartments(token),
+        userService.getAdminConfigStatus(token),
       ]);
-
-      setInvitations(invitationResponse.data || []);
-      setDepartments(departmentResponse.data || []);
       setUsers(userResponse.data || []);
+      setDepartments(departmentResponse.data || []);
+      setConfigStatus(configResponse.data || null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load invitations');
+      setError(err instanceof Error ? err.message : 'Failed to load user management data');
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleSendInvite = async () => {
-    if (!inviteEmail.trim() || !token) return;
+  const managerOptions = useMemo(
+    () => users.filter((item) => ['admin', 'manager'].includes(String(item.role))),
+    [users]
+  );
+
+  const filteredUsers = useMemo(() => {
+    const keyword = search.trim().toLowerCase();
+    return users.filter((item) => {
+      const status = (item.account_status || (item.isActive === false ? 'locked' : 'active')) as AccountStatus;
+      const matchesStatus = statusFilter === 'all' || status === statusFilter;
+      const matchesSearch = !keyword
+        || item.full_name.toLowerCase().includes(keyword)
+        || item.email.toLowerCase().includes(keyword)
+        || item.position_title?.toLowerCase().includes(keyword);
+      return matchesStatus && matchesSearch;
+    });
+  }, [users, search, statusFilter]);
+
+  const openCreate = () => {
+    setEditingUser(null);
+    setForm(emptyForm);
+    setShowDialog(true);
+  };
+
+  const openEdit = (target: User) => {
+    setEditingUser(target);
+    setForm({
+      full_name: target.full_name,
+      email: target.email,
+      company_email: target.company_email || target.email,
+      notification_email: target.notification_email || target.email,
+      role: (target.role || 'employee') as UserRole,
+      department_id: getEntityId(target.department_id),
+      position_title: target.position_title || '',
+      manager_id: getEntityId(target.manager_id),
+    });
+    setShowDialog(true);
+  };
+
+  const setFormValue = (key: keyof UserPayload, value: string) => {
+    setForm((current) => ({ ...current, [key]: value }));
+  };
+
+  const handleSave = async () => {
+    if (!token || !form.full_name.trim() || !form.email.trim()) return;
 
     try {
-      setIsSending(true);
+      setIsSaving(true);
       setError('');
-      const response = await authService.sendInvitation({
-        email: inviteEmail.trim(),
-        role: inviteRole,
-        department_id: inviteDepartmentId === 'none' ? undefined : inviteDepartmentId,
-      }, token);
+      setSuccess('');
+      const payload: UserPayload = {
+        ...form,
+        full_name: form.full_name.trim(),
+        email: form.email.trim(),
+        company_email: form.company_email?.trim() || form.email.trim(),
+        notification_email: form.notification_email?.trim() || form.email.trim(),
+        department_id: form.department_id || undefined,
+        manager_id: form.manager_id || undefined,
+        position_title: form.position_title?.trim(),
+      };
 
-      if (!response.success) {
-        throw new Error(response.message || 'Failed to send invitation');
+      const response = editingUser
+        ? await userService.updateUser(getEntityId(editingUser), payload, token)
+        : await userService.createUser(payload, token);
+
+      if (response.data) {
+        setUsers((current) => editingUser
+          ? current.map((item) => (getEntityId(item) === getEntityId(response.data as User) ? response.data as User : item))
+          : [response.data as User, ...current]);
       }
 
-      setInviteEmail('');
-      setInviteRole('employee');
-      setInviteDepartmentId('none');
-      setShowInviteDialog(false);
-      await loadData();
+      setSuccess(editingUser ? 'Da cap nhat nguoi dung' : 'Da tao tai khoan va gui email moi');
+      setShowDialog(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to send invitation');
+      setError(err instanceof Error ? err.message : 'Save user failed');
     } finally {
-      setIsSending(false);
+      setIsSaving(false);
     }
   };
 
-  const handleToggleUser = async (user: User, isActive: boolean) => {
-    const userId = user._id || user.id;
-    if (!token || !userId) return;
-
+  const runUserAction = async (target: User, action: 'resend' | 'reset' | AccountStatus) => {
+    if (!token) return;
+    const id = getEntityId(target);
     try {
-      setUsers((current) => current.map((item) => (
-        (item._id || item.id) === userId ? { ...item, isActive } : item
-      )));
-      await userService.updateStatus(userId, isActive, token);
+      setActionUserId(`${id}:${action}`);
+      setError('');
+      setSuccess('');
+
+      if (action === 'resend') {
+        await userService.resendInvite(id, token);
+        setSuccess('Da gui lai email moi');
+      } else if (action === 'reset') {
+        await userService.resetPassword(id, token);
+        setSuccess('Da gui email reset mat khau');
+      } else {
+        const response = await userService.updateAccountStatus(id, action, token);
+        if (response.data) {
+          setUsers((current) => current.map((item) => (getEntityId(item) === id ? response.data as User : item)));
+        }
+        setSuccess('Da cap nhat trang thai tai khoan');
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update user status');
-      await loadData();
+      setError(err instanceof Error ? err.message : 'Action failed');
+    } finally {
+      setActionUserId('');
     }
   };
 
-  const renderInvitation = (invitation: Invitation) => {
-    const config = statusConfig[invitation.status];
-    const Icon = config.icon;
+  const getDepartmentName = (value?: string | Department) => {
+    if (typeof value === 'object' && value) return value.name;
+    return departments.find((department) => getEntityId(department) === value)?.name || 'Chua gan';
+  };
 
+  const getManagerName = (value?: string | User) => {
+    if (typeof value === 'object' && value) return value.full_name;
+    return users.find((item) => getEntityId(item) === value)?.full_name || 'Chua gan';
+  };
+
+  if (!canManage) {
     return (
-      <div key={invitation._id || invitation.id} className={`p-4 rounded-lg border ${config.bg}`}>
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-start gap-3 min-w-0">
-            <Icon className={`w-5 h-5 mt-1 flex-shrink-0 ${config.color}`} />
-            <div className="min-w-0">
-              <p className="font-medium text-gray-900 truncate">{invitation.email}</p>
-              <p className="text-sm text-gray-600">Role: {invitation.role}</p>
-              <p className="text-sm text-gray-500">
-                Het han: {new Date(invitation.expiresAt).toLocaleDateString('vi-VN')}
-              </p>
-            </div>
-          </div>
-          <span className={`text-xs font-semibold px-2 py-1 rounded ${config.color}`}>
-            {config.label}
-          </span>
-        </div>
+      <div className="rounded-md border border-amber-200 bg-amber-50 p-4 text-sm font-medium text-amber-800">
+        Chi admin moi duoc truy cap User Management.
       </div>
     );
-  };
+  }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between gap-4">
+    <div className="space-y-5">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Quan ly loi moi</h1>
-          <p className="text-gray-600 mt-1">Gui email moi nhan su va khoa tai khoan khi can.</p>
+          <h1 className="text-2xl font-bold text-slate-900">Admin / User Management</h1>
+          <p className="mt-1 text-sm text-slate-500">Quan ly tai khoan noi bo, email cong ty, phong ban, chuc vu va manager truc tiep.</p>
         </div>
-        <Button onClick={() => setShowInviteDialog(true)} className="gap-2">
-          <Mail className="w-4 h-4" />
-          Gui loi moi
+        <Button onClick={openCreate} className="gap-2">
+          <UserPlus className="h-4 w-4" />
+          Tao tai khoan
         </Button>
       </div>
 
-      {error && (
-        <div className="p-4 bg-red-50 border border-red-200 rounded-lg flex items-center gap-2 text-red-700">
-          <AlertCircle className="w-5 h-5" />
-          <span>{error}</span>
+      {configStatus && (
+        <div className="grid gap-3 md:grid-cols-2">
+          <div className={`rounded-md border p-3 text-sm ${configStatus.mail.configured ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-red-200 bg-red-50 text-red-800'}`}>
+            <div className="flex items-center gap-2 font-semibold">
+              {configStatus.mail.configured ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
+              Mail provider: {configStatus.mail.configured ? 'Da cau hinh' : 'Chua cau hinh'}
+            </div>
+            {!configStatus.mail.configured && <p className="mt-1">Thieu: {configStatus.mail.missing.join(', ')}</p>}
+          </div>
+          <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+            <div className="flex items-center gap-2 font-semibold">
+              <Mail className="h-4 w-4" />
+              Cap phat email cong ty
+            </div>
+            <p className="mt-1">{configStatus.google_workspace.configured ? 'Google Workspace Admin SDK da cau hinh.' : 'Chua tich hop cap phat email tu dong. Admin nhap email cong ty da ton tai.'}</p>
+          </div>
         </div>
       )}
 
-      {isLoading ? (
-        <div className="text-center py-12 text-gray-600">Dang tai...</div>
-      ) : (
-        <>
-          <Tabs defaultValue="pending" className="space-y-4">
-            <TabsList>
-              <TabsTrigger value="pending">Dang cho ({grouped.pending.length})</TabsTrigger>
-              <TabsTrigger value="accepted">Da tham gia ({grouped.accepted.length})</TabsTrigger>
-              <TabsTrigger value="expired">Het han ({grouped.expired.length})</TabsTrigger>
-            </TabsList>
+      {error && <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+      {success && <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{success}</div>}
 
-            <TabsContent value="pending" className="space-y-3">
-              {grouped.pending.length ? grouped.pending.map(renderInvitation) : (
-                <Card><CardContent className="text-center py-10 text-gray-600">Khong co loi moi dang cho</CardContent></Card>
-              )}
-            </TabsContent>
-            <TabsContent value="accepted" className="space-y-3">
-              {grouped.accepted.length ? grouped.accepted.map(renderInvitation) : (
-                <Card><CardContent className="text-center py-10 text-gray-600">Chua co loi moi duoc chap nhan</CardContent></Card>
-              )}
-            </TabsContent>
-            <TabsContent value="expired" className="space-y-3">
-              {grouped.expired.length ? grouped.expired.map(renderInvitation) : (
-                <Card><CardContent className="text-center py-10 text-gray-600">Khong co loi moi het han</CardContent></Card>
-              )}
-            </TabsContent>
-          </Tabs>
+      <div className="flex flex-col gap-3 rounded-md border border-slate-200 bg-white p-3 md:flex-row md:items-center">
+        <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Tim theo ten, email, chuc vu..." className="md:max-w-sm" />
+        <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as AccountStatus | 'all')}>
+          <SelectTrigger className="md:w-56"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Tat ca trang thai</SelectItem>
+            <SelectItem value="pending">Pending invitation</SelectItem>
+            <SelectItem value="active">Active</SelectItem>
+            <SelectItem value="locked">Locked</SelectItem>
+            <SelectItem value="disabled">Disabled</SelectItem>
+          </SelectContent>
+        </Select>
+        <Button variant="outline" onClick={loadData} className="gap-2">
+          <RefreshCcw className="h-4 w-4" />
+          Refresh
+        </Button>
+      </div>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-lg">
-                <ShieldOff className="w-5 h-5" />
-                Trang thai tai khoan
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="divide-y">
-              {users.map((user) => (
-                <div key={user._id || user.id} className="flex items-center justify-between gap-4 py-3">
+      <div className="overflow-hidden rounded-md border border-slate-200 bg-white">
+        <div className="grid grid-cols-[minmax(260px,1.4fr)_130px_150px_150px_140px_210px] gap-0 border-b border-slate-200 bg-slate-50 px-4 py-2 text-xs font-bold uppercase text-slate-500">
+          <div>Nguoi dung</div>
+          <div>Role</div>
+          <div>Phong ban</div>
+          <div>Manager</div>
+          <div>Trang thai</div>
+          <div className="text-right">Action</div>
+        </div>
+        {isLoading ? (
+          <div className="flex items-center justify-center py-16">
+            <Loader2 className="h-6 w-6 animate-spin text-emerald-600" />
+          </div>
+        ) : filteredUsers.length === 0 ? (
+          <div className="py-12 text-center text-sm text-slate-500">Khong co nguoi dung phu hop.</div>
+        ) : (
+          <div className="divide-y divide-slate-100">
+            {filteredUsers.map((item) => {
+              const id = getEntityId(item);
+              const status = (item.account_status || (item.isActive === false ? 'locked' : 'active')) as AccountStatus;
+              const pending = status === 'pending';
+              const actionLoading = actionUserId.startsWith(`${id}:`);
+
+              return (
+                <div key={id} className="grid grid-cols-[minmax(260px,1.4fr)_130px_150px_150px_140px_210px] items-center gap-0 px-4 py-3 text-sm">
                   <div className="min-w-0">
-                    <p className="font-medium text-gray-900 truncate">{user.full_name}</p>
-                    <p className="text-sm text-gray-500 truncate">{user.email} - {user.role}</p>
+                    <p className="truncate font-semibold text-slate-900">{item.full_name}</p>
+                    <p className="truncate text-xs text-slate-500">{item.email}</p>
+                    <p className="truncate text-xs text-slate-400">
+                      Notify: {item.notification_email || item.email} / {item.position_title || 'Chua gan chuc vu'}
+                    </p>
+                    <p className="truncate text-xs text-slate-400">
+                      Created: {item.createdAt ? new Date(item.createdAt).toLocaleDateString('vi-VN') : '--'} / Last login: {item.lastLoginAt ? new Date(item.lastLoginAt).toLocaleString('vi-VN') : '--'}
+                    </p>
                   </div>
-                  <Switch checked={user.isActive ?? true} onCheckedChange={(checked) => handleToggleUser(user, checked)} />
+                  <div className="font-medium capitalize">{item.role}</div>
+                  <div className="truncate text-slate-600">{getDepartmentName(item.department_id)}</div>
+                  <div className="truncate text-slate-600">{getManagerName(item.manager_id)}</div>
+                  <div>
+                    <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">{statusLabels[status]}</span>
+                  </div>
+                  <div className="flex items-center justify-end gap-1">
+                    <Button variant="ghost" size="icon" onClick={() => openEdit(item)} disabled={actionLoading}>
+                      <Edit className="h-4 w-4" />
+                    </Button>
+                    {pending && (
+                      <Button variant="ghost" size="icon" onClick={() => runUserAction(item, 'resend')} disabled={actionLoading || !configStatus?.mail.configured} title={!configStatus?.mail.configured ? 'Chuc nang chua duoc cau hinh' : 'Gui lai email moi'}>
+                        <Mail className="h-4 w-4" />
+                      </Button>
+                    )}
+                    <Button variant="ghost" size="icon" onClick={() => runUserAction(item, 'reset')} disabled={actionLoading || !configStatus?.mail.configured || status === 'disabled'} title={!configStatus?.mail.configured ? 'Chuc nang chua duoc cau hinh' : 'Reset mat khau'}>
+                      <RotateCcw className="h-4 w-4" />
+                    </Button>
+                    <Select value={status} onValueChange={(value) => runUserAction(item, value as AccountStatus)} disabled={actionLoading}>
+                      <SelectTrigger className="h-8 w-28 text-xs"><Lock className="mr-1 h-3.5 w-3.5" /><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="pending">Pending</SelectItem>
+                        <SelectItem value="active">Active</SelectItem>
+                        <SelectItem value="locked">Locked</SelectItem>
+                        <SelectItem value="disabled">Disabled</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
-              ))}
-            </CardContent>
-          </Card>
-        </>
-      )}
+              );
+            })}
+          </div>
+        )}
+      </div>
 
-      <Dialog open={showInviteDialog} onOpenChange={setShowInviteDialog}>
-        <DialogContent>
+      <Dialog open={showDialog} onOpenChange={setShowDialog}>
+        <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Gui loi moi</DialogTitle>
-            <DialogDescription>Nhap email, role va phong ban mac dinh cho nhan su moi.</DialogDescription>
+            <DialogTitle>{editingUser ? 'Sua nguoi dung' : 'Tao tai khoan moi'}</DialogTitle>
+            <DialogDescription>
+              Tai khoan dang nhap noi bo tach rieng email cong ty va email nhan thong bao. He thong khong tu cap phat email cong ty khi Google Workspace chua duoc cau hinh.
+            </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium mb-1">Email</label>
-              <Input
-                type="email"
-                placeholder="nhanvien@company.com"
-                value={inviteEmail}
-                onChange={(event) => setInviteEmail(event.target.value)}
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-1">Role</label>
-              <Select value={inviteRole} onValueChange={(value) => setInviteRole(value as UserRole)}>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <Field label="Ho ten">
+              <Input value={form.full_name} onChange={(event) => setFormValue('full_name', event.target.value)} />
+            </Field>
+            <Field label="Email cong ty / dang nhap">
+              <Input type="email" value={form.email} onChange={(event) => setFormValue('email', event.target.value)} disabled={Boolean(editingUser)} />
+            </Field>
+            <Field label="Email thong bao">
+              <Input type="email" value={form.notification_email || ''} onChange={(event) => setFormValue('notification_email', event.target.value)} />
+            </Field>
+            <Field label="Chuc vu">
+              <Input value={form.position_title || ''} onChange={(event) => setFormValue('position_title', event.target.value)} />
+            </Field>
+            <Field label="Role">
+              <Select value={form.role} onValueChange={(value) => setFormValue('role', value as UserRole)}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="employee">Nhan vien</SelectItem>
-                  <SelectItem value="manager">Quan ly</SelectItem>
                   <SelectItem value="admin">Admin</SelectItem>
+                  <SelectItem value="manager">Manager</SelectItem>
+                  <SelectItem value="employee">Employee</SelectItem>
                 </SelectContent>
               </Select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-1">Phong ban</label>
-              <Select value={inviteDepartmentId} onValueChange={setInviteDepartmentId}>
+            </Field>
+            <Field label="Phong ban">
+              <Select value={form.department_id || 'none'} onValueChange={(value) => setFormValue('department_id', value === 'none' ? '' : value)}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">Khong gan phong ban</SelectItem>
+                  <SelectItem value="none">Chua gan</SelectItem>
                   {departments.map((department) => (
-                    <SelectItem key={department._id || department.id} value={department._id || department.id || ''}>
-                      {department.name}
-                    </SelectItem>
+                    <SelectItem key={getEntityId(department)} value={getEntityId(department)}>{department.name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-            </div>
+            </Field>
+            <Field label="Quan ly truc tiep">
+              <Select value={form.manager_id || 'none'} onValueChange={(value) => setFormValue('manager_id', value === 'none' ? '' : value)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Chua gan</SelectItem>
+                  {managerOptions.map((manager) => (
+                    <SelectItem key={getEntityId(manager)} value={getEntityId(manager)}>{manager.full_name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+          </div>
 
-            <div className="flex gap-2 justify-end">
-              <Button variant="outline" onClick={() => setShowInviteDialog(false)}>Huy</Button>
-              <Button onClick={handleSendInvite} disabled={!inviteEmail || isSending}>
-                {isSending ? 'Dang gui...' : 'Gui loi moi'}
-              </Button>
-            </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" onClick={() => setShowDialog(false)}>Huy</Button>
+            <Button onClick={handleSave} disabled={isSaving || !form.full_name.trim() || !form.email.trim()}>
+              {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : editingUser ? 'Luu thay doi' : 'Tao va gui moi'}
+            </Button>
           </div>
         </DialogContent>
       </Dialog>
     </div>
   );
 };
+
+const Field = ({ label, children }: { label: string; children: ReactNode }) => (
+  <label className="space-y-1.5">
+    <span className="block text-sm font-medium text-slate-700">{label}</span>
+    {children}
+  </label>
+);
 
 export default InvitationsPage;

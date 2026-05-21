@@ -6,7 +6,20 @@ const { v2: cloudinary } = require("cloudinary");
 const { verifyToken } = require("../middleware/auth.middleware");
 
 const router = express.Router();
-const uploadDir = path.join(__dirname, "..", "..", "uploads");
+const uploadDir = path.resolve(process.env.FILE_STORAGE_PATH || path.join(__dirname, "..", "..", "uploads"));
+const MAX_FILE_SIZE = 10 * 1024 * 1024;
+const DANGEROUS_EXTENSIONS = new Set([
+  ".bat",
+  ".cmd",
+  ".com",
+  ".exe",
+  ".js",
+  ".msi",
+  ".ps1",
+  ".scr",
+  ".sh",
+  ".vbs",
+]);
 
 fs.mkdirSync(uploadDir, { recursive: true });
 
@@ -26,14 +39,23 @@ if (hasCloudinaryConfig) {
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 20 * 1024 * 1024 },
+  limits: { fileSize: MAX_FILE_SIZE },
   fileFilter: (_req, file, cb) => {
+    const extension = path.extname(file.originalname || "").toLowerCase();
+    if (DANGEROUS_EXTENSIONS.has(extension)) {
+      return cb(new Error("Executable or script files are not allowed"));
+    }
+
     const allowed = [
       "application/pdf",
       "application/msword",
       "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
       "application/vnd.ms-excel",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/vnd.ms-powerpoint",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "text/plain",
+      "text/csv",
       "image/jpeg",
       "image/png",
       "image/webp",
@@ -43,6 +65,19 @@ const upload = multer({
     cb(new Error("Unsupported file type"));
   },
 });
+
+const handleUpload = (req, res, next) => {
+  upload.single("file")(req, res, (error) => {
+    if (!error) return next();
+
+    const statusCode = error.code === "LIMIT_FILE_SIZE" ? 413 : 400;
+    const message = error.code === "LIMIT_FILE_SIZE"
+      ? "File size must be 10MB or less"
+      : error.message;
+
+    return res.status(statusCode).json({ success: false, message });
+  });
+};
 
 const uploadToCloudinary = (file) => new Promise((resolve, reject) => {
   const stream = cloudinary.uploader.upload_stream(
@@ -64,22 +99,32 @@ const saveLocalFile = (req, file) => {
   const safeName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
   const fileName = `${Date.now()}-${safeName}`;
   fs.writeFileSync(path.join(uploadDir, fileName), file.buffer);
+  const publicBaseUrl = process.env.FILE_PUBLIC_BASE_URL
+    ? process.env.FILE_PUBLIC_BASE_URL.replace(/\/$/, "")
+    : `${req.protocol}://${req.get("host")}/uploads`;
 
-  return `${req.protocol}://${req.get("host")}/uploads/${fileName}`;
+  return {
+    fileUrl: `${publicBaseUrl}/${fileName}`,
+    storageKey: fileName,
+  };
 };
 
-router.post("/", verifyToken, upload.single("file"), async (req, res) => {
+router.post("/", verifyToken, handleUpload, async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ success: false, message: "file is required" });
     }
 
     let fileUrl;
+    let storageKey = "";
     if (hasCloudinaryConfig) {
       const uploaded = await uploadToCloudinary(req.file);
       fileUrl = uploaded.secure_url;
+      storageKey = uploaded.public_id;
     } else {
-      fileUrl = saveLocalFile(req, req.file);
+      const saved = saveLocalFile(req, req.file);
+      fileUrl = saved.fileUrl;
+      storageKey = saved.storageKey;
     }
 
     res.status(201).json({
@@ -89,6 +134,10 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
         file_name: req.file.originalname,
         file_type: req.file.mimetype,
         size: req.file.size,
+        uploaded_by: req.user.userId,
+        uploaded_at: new Date(),
+        storage_key: storageKey,
+        preview_url: fileUrl,
       },
     });
   } catch (error) {

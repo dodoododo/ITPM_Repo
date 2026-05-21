@@ -1,280 +1,313 @@
-/**
- * DEPARTMENT MANAGEMENT ROUTES
- * Quản lý phòng ban và thành viên
- */
-
-const express = require('express');
-const { Department, User } = require('../models');
-const { verifyToken, requireRole } = require('../middleware/auth.middleware');
-const { formatResponse, formatErrorResponse, createActivityLog } = require('../utils/apiHelpers');
+const express = require("express");
+const { Department, User, ActivityLog } = require("../models");
+const { verifyToken, requireRole } = require("../middleware/auth.middleware");
+const { formatResponse, formatErrorResponse, createActivityLog } = require("../utils/apiHelpers");
+const { isAdmin } = require("../utils/rbac");
 
 const router = express.Router();
 
-/**
- * GET /api/departments
- * Lấy danh sách tất cả phòng ban (kèm member count)
- * 
- * Response: { success: true, data: [ departments ] }
- */
-router.get('/', verifyToken, async (req, res) => {
+const populateDepartment = (query) =>
+  query
+    .populate("manager_id", "full_name email avatar role")
+    .populate("member_ids", "full_name email avatar role");
+
+const getDepartmentWithMembers = (id) => populateDepartment(Department.findById(id));
+
+const normalizeCode = (value) => value?.trim().toUpperCase();
+
+const getRequestedManagerId = (body) => body.managerId || body.manager_id;
+
+const validateDepartmentManager = async (managerId) => {
+  if (!managerId) return null;
+
+  const manager = await User.findById(managerId).select("_id role full_name email");
+  if (!manager) {
+    const error = new Error("Manager khong ton tai");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  if (!["admin", "manager"].includes(manager.role)) {
+    const error = new Error("managerId phai thuoc user co role manager hoac admin");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  return manager;
+};
+
+const addMemberCount = (department) => ({
+  ...department.toObject(),
+  member_count: department.member_ids?.length || 0,
+});
+
+const buildDepartmentScopeFilter = (user) => {
+  if (isAdmin(user)) return {};
+  return {
+    $or: [
+      { manager_id: user.userId },
+      { member_ids: user.userId },
+    ],
+  };
+};
+
+router.get("/", verifyToken, async (req, res) => {
   try {
-    const departments = await Department.find()
-      .populate('member_ids', 'full_name email avatar')
+    const departments = await populateDepartment(Department.find(buildDepartmentScopeFilter(req.user)))
       .sort({ createdAt: -1 });
 
-    // Thêm member_count vào response
-    const departmentsWithCount = departments.map(dept => ({
-      ...dept.toObject(),
-      member_count: dept.member_ids?.length || 0
-    }));
-
-    res.json(formatResponse(true, departmentsWithCount));
+    res.json(formatResponse(true, departments.map(addMemberCount)));
   } catch (error) {
-    const { statusCode, body } = formatErrorResponse(error);
+    const { statusCode, body } = formatErrorResponse(error, error.statusCode || 500);
     res.status(statusCode).json(body);
   }
 });
 
-/**
- * GET /api/departments/:id
- * Lấy chi tiết phòng ban
- */
-router.get('/:id', verifyToken, async (req, res) => {
+router.get("/:id", verifyToken, async (req, res) => {
   try {
-    const department = await Department.findById(req.params.id)
-      .populate('member_ids', 'full_name email avatar role');
+    const department = await getDepartmentWithMembers(req.params.id);
 
     if (!department) {
       return res.status(404).json({
         success: false,
-        message: 'Phòng ban không tồn tại'
+        message: "Phong ban khong ton tai",
       });
     }
 
-    res.json(formatResponse(true, {
-      ...department.toObject(),
-      member_count: department.member_ids?.length || 0
-    }));
+    if (!isAdmin(req.user)) {
+      const requesterId = req.user.userId;
+      const isManager = department.manager_id?._id?.toString() === requesterId;
+      const isMember = (department.member_ids || []).some((member) => member._id?.toString() === requesterId);
+
+      if (!isManager && !isMember) {
+        return res.status(403).json({
+          success: false,
+          message: "Ban khong co quyen xem phong ban nay",
+        });
+      }
+    }
+
+    res.json(formatResponse(true, addMemberCount(department)));
   } catch (error) {
-    const { statusCode, body } = formatErrorResponse(error);
+    const { statusCode, body } = formatErrorResponse(error, error.statusCode || 500);
     res.status(statusCode).json(body);
   }
 });
 
-/**
- * POST /api/departments
- * Tạo phòng ban mới
- * 
- * Requires: Admin role
- * Body: { name: string, description?: string, color?: string }
- * Response: { success: true, data: { department } }
- */
-router.post('/', verifyToken, requireRole('admin'), async (req, res) => {
+router.post("/", verifyToken, requireRole("admin"), async (req, res) => {
   try {
     const { name, description, color } = req.body;
+    const code = normalizeCode(req.body.code);
+    const managerId = getRequestedManagerId(req.body);
 
-    if (!name) {
+    if (!name?.trim() || !code || !managerId) {
       return res.status(400).json({
         success: false,
-        message: 'Tên phòng ban là bắt buộc'
+        message: "name, code va managerId la bat buoc",
       });
     }
 
-    const department = new Department({
-      name,
-      description: description || '',
-      color: color || '#2563EB',
-      member_ids: []
+    await validateDepartmentManager(managerId);
+
+    const duplicated = await Department.exists({ code });
+    if (duplicated) {
+      return res.status(409).json({
+        success: false,
+        message: "Ma phong ban da ton tai",
+      });
+    }
+
+    const department = await Department.create({
+      name: name.trim(),
+      code,
+      description: description || "",
+      color: color || "#2563EB",
+      manager_id: managerId,
+      member_ids: [managerId],
     });
 
-    await department.save();
-
-    // Log activity
     await createActivityLog(
-      require('../models').ActivityLog,
+      ActivityLog,
       req.user.userId,
-      'tạo phòng ban',
-      'Department',
+      "create_department",
+      "Department",
       department._id,
-      { name, color }
+      { name: department.name, code, managerId, color: department.color }
     );
 
-    res.status(201).json(
-      formatResponse(true, department, 'Phòng ban đã được tạo')
-    );
+    res
+      .status(201)
+      .json(formatResponse(true, await getDepartmentWithMembers(department._id), "Department created"));
   } catch (error) {
-    const { statusCode, body } = formatErrorResponse(error);
+    const { statusCode, body } = formatErrorResponse(error, error.statusCode || 500);
     res.status(statusCode).json(body);
   }
 });
 
-/**
- * PATCH /api/departments/:id
- * Cập nhật thông tin phòng ban
- * 
- * Requires: Admin role
- * Body: { name?, description?, color? }
- */
-router.patch('/:id', verifyToken, requireRole('admin'), async (req, res) => {
+router.patch("/:id", verifyToken, requireRole("admin"), async (req, res) => {
   try {
     const { name, description, color } = req.body;
-
+    const code = normalizeCode(req.body.code);
+    const managerId = getRequestedManagerId(req.body);
     const updateData = {};
-    if (name) updateData.name = name;
+
+    if (name?.trim()) updateData.name = name.trim();
+    if (code) updateData.code = code;
     if (description !== undefined) updateData.description = description;
     if (color) updateData.color = color;
+    if (managerId) {
+      await validateDepartmentManager(managerId);
+      updateData.manager_id = managerId;
+    }
+
+    if (code) {
+      const duplicated = await Department.exists({ code, _id: { $ne: req.params.id } });
+      if (duplicated) {
+        return res.status(409).json({
+          success: false,
+          message: "Ma phong ban da ton tai",
+        });
+      }
+    }
 
     const department = await Department.findByIdAndUpdate(
       req.params.id,
       updateData,
       { new: true }
-    ).populate('member_ids', 'full_name email avatar');
+    );
 
     if (!department) {
       return res.status(404).json({
         success: false,
-        message: 'Phòng ban không tồn tại'
+        message: "Phong ban khong ton tai",
       });
     }
 
-    res.json(formatResponse(true, department, 'Phòng ban đã được cập nhật'));
+    if (managerId) {
+      department.member_ids.addToSet(managerId);
+      await department.save();
+    }
+
+    await createActivityLog(
+      ActivityLog,
+      req.user.userId,
+      "update_department",
+      "Department",
+      department._id,
+      updateData
+    );
+
+    res.json(formatResponse(true, await getDepartmentWithMembers(department._id), "Department updated"));
   } catch (error) {
-    const { statusCode, body } = formatErrorResponse(error);
+    const { statusCode, body } = formatErrorResponse(error, error.statusCode || 500);
     res.status(statusCode).json(body);
   }
 });
 
-/**
- * POST /api/departments/:id/members
- * Thêm thành viên vào phòng ban
- * 
- * Requires: Admin role
- * Body: { user_ids: [ string ] }
- * 
- * Logic: Sử dụng $addToSet để thêm (tránh duplicate)
- * Response: { success: true, data: { department } }
- */
-router.post('/:id/members', verifyToken, requireRole(['admin', 'manager']), async (req, res) => {
+router.post("/:id/members", verifyToken, requireRole("admin"), async (req, res) => {
   try {
     const { user_ids } = req.body;
 
     if (!Array.isArray(user_ids) || user_ids.length === 0) {
       return res.status(400).json({
         success: false,
-        message: 'user_ids phải là mảng không rỗng'
+        message: "user_ids phai la mang khong rong",
       });
     }
 
-    // Sử dụng $addToSet để thêm (tránh duplicate)
     const department = await Department.findByIdAndUpdate(
       req.params.id,
-      {
-        $addToSet: { member_ids: { $each: user_ids } }
-      },
+      { $addToSet: { member_ids: { $each: user_ids } } },
       { new: true }
-    ).populate('member_ids', 'full_name email avatar');
+    );
 
     if (!department) {
       return res.status(404).json({
         success: false,
-        message: 'Phòng ban không tồn tại'
+        message: "Phong ban khong ton tai",
       });
     }
 
-    // Log activity
     await createActivityLog(
-      require('../models').ActivityLog,
+      ActivityLog,
       req.user.userId,
-      'thêm thành viên vào phòng ban',
-      'Department',
+      "add_department_members",
+      "Department",
       department._id,
       { added_user_ids: user_ids, member_count: department.member_ids.length }
     );
 
-    res.json(
-      formatResponse(true, department, 'Thành viên đã được thêm')
-    );
+    res.json(formatResponse(true, await getDepartmentWithMembers(department._id), "Members added"));
   } catch (error) {
-    const { statusCode, body } = formatErrorResponse(error);
+    const { statusCode, body } = formatErrorResponse(error, error.statusCode || 500);
     res.status(statusCode).json(body);
   }
 });
 
-/**
- * DELETE /api/departments/:id/members/:userId
- * Xóa thành viên khỏi phòng ban
- * 
- * Requires: Admin role
- * 
- * Logic: Sử dụng $pull để xóa khỏi mảng
- * Response: { success: true, data: { department } }
- */
-router.delete('/:id/members/:userId', verifyToken, requireRole(['admin', 'manager']), async (req, res) => {
+router.delete("/:id/members/:userId", verifyToken, requireRole("admin"), async (req, res) => {
   try {
     const { id, userId } = req.params;
+
+    const existingDepartment = await Department.findById(id).select("manager_id");
+    if (!existingDepartment) {
+      return res.status(404).json({
+        success: false,
+        message: "Phong ban khong ton tai",
+      });
+    }
+
+    if (existingDepartment.manager_id?.toString() === userId) {
+      return res.status(409).json({
+        success: false,
+        message: "Khong the xoa manager cua phong ban. Hay chi dinh manager khac truoc.",
+      });
+    }
 
     const department = await Department.findByIdAndUpdate(
       id,
       { $pull: { member_ids: userId } },
       { new: true }
-    ).populate('member_ids', 'full_name email avatar');
+    );
 
-    if (!department) {
-      return res.status(404).json({
-        success: false,
-        message: 'Phòng ban không tồn tại'
-      });
-    }
-
-    // Log activity
     await createActivityLog(
-      require('../models').ActivityLog,
+      ActivityLog,
       req.user.userId,
-      'xóa thành viên khỏi phòng ban',
-      'Department',
+      "remove_department_member",
+      "Department",
       department._id,
       { removed_user_id: userId, member_count: department.member_ids.length }
     );
 
-    res.json(
-      formatResponse(true, department, 'Thành viên đã bị xóa')
-    );
+    res.json(formatResponse(true, await getDepartmentWithMembers(department._id), "Member removed"));
   } catch (error) {
-    const { statusCode, body } = formatErrorResponse(error);
+    const { statusCode, body } = formatErrorResponse(error, error.statusCode || 500);
     res.status(statusCode).json(body);
   }
 });
 
-/**
- * DELETE /api/departments/:id
- * Xóa phòng ban
- * 
- * Requires: Admin role
- */
-router.delete('/:id', verifyToken, requireRole('admin'), async (req, res) => {
+router.delete("/:id", verifyToken, requireRole("admin"), async (req, res) => {
   try {
     const department = await Department.findByIdAndDelete(req.params.id);
 
     if (!department) {
       return res.status(404).json({
         success: false,
-        message: 'Phòng ban không tồn tại'
+        message: "Phong ban khong ton tai",
       });
     }
 
-    // Log activity
     await createActivityLog(
-      require('../models').ActivityLog,
+      ActivityLog,
       req.user.userId,
-      'xóa phòng ban',
-      'Department',
+      "delete_department",
+      "Department",
       department._id,
-      { name: department.name }
+      { name: department.name, code: department.code }
     );
 
-    res.json(formatResponse(true, null, 'Phòng ban đã được xóa'));
+    res.json(formatResponse(true, null, "Department deleted"));
   } catch (error) {
-    const { statusCode, body } = formatErrorResponse(error);
+    const { statusCode, body } = formatErrorResponse(error, error.statusCode || 500);
     res.status(statusCode).json(body);
   }
 });

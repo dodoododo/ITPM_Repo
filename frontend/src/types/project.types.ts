@@ -6,6 +6,7 @@
 import type { User, Department } from './user.types';
 
 export type ProjectStatus = 'planning' | 'active' | 'on_hold' | 'completed';
+export type ProjectVisibility = 'public' | 'private';
 
 export interface Project {
   _id?: string;
@@ -14,6 +15,7 @@ export interface Project {
   description?: string;
   color?: string;
   status: ProjectStatus;
+  visibility?: ProjectVisibility;
   progress: number;
   start_date?: string;
   end_date?: string;

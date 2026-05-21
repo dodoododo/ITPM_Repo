@@ -10,16 +10,16 @@
  */
 
 // --- USER & AUTHENTICATION TYPES ---
-export type { UserRole, InvitationStatus } from './user.types';
+export type { UserRole, InvitationStatus, AccountStatus } from './user.types';
 export type { User, Invitation, Department } from './user.types';
 
 // --- PROJECT TYPES ---
-export type { ProjectStatus } from './project.types';
+export type { ProjectStatus, ProjectVisibility } from './project.types';
 export type { Project } from './project.types';
 
 // --- TASK TYPES ---
 export type { TaskStatus, TaskPriority, Priority, ReviewStatus } from './task.types';
-export type { Attachment, Subtask, ExecutionResult, Task } from './task.types';
+export type { Attachment, Subtask, TaskDependency, ExecutionResult, TaskKpiResult, Task } from './task.types';
 
 // --- COMMUNICATION TYPES ---
 export type { NotificationType } from './communication.types';
