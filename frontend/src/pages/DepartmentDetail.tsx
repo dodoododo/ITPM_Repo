@@ -1,228 +1,221 @@
-import { useState, useMemo } from 'react';
-import { useParams, Link } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
-import { type Task, type User, type Department, type Project, type TaskStatus } from '@/types';
+import { useEffect, useMemo, useState } from 'react';
+import { Link, useParams } from 'react-router-dom';
+import { ArrowLeft, AlertTriangle, Clock, FolderKanban, ListChecks, Loader2, TrendingUp, Users } from 'lucide-react';
+import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
+import { useAuth } from '@/hooks/useAuth';
+import { departmentService } from '@/services/departmentService';
+import { projectService } from '@/services/projectService';
+import { taskService } from '@/services/taskService';
+import { userService } from '@/services/userService';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { 
-  ArrowLeft, Loader2, Users, ListChecks, 
-  TrendingUp, AlertTriangle, Clock, FolderKanban 
-} from 'lucide-react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
-import { Button } from '@/components/ui/button';
+import type { Department, Project, Task, TaskStatus, User } from '@/types';
 
-// --- 1. MOCK DATA NÂNG CAO (Kết nối các bảng) ---
+const PIE_COLORS = ['#94a3b8', '#3b82f6', '#f59e0b', '#ef4444', '#10b981'];
+const STATUS_LABELS: Record<TaskStatus, string> = {
+  todo: 'Can lam',
+  in_progress: 'Dang lam',
+  review: 'Cho nghiem thu',
+  needs_revision: 'Can sua',
+  done: 'Hoan thanh',
+};
 
-const MOCK_USERS: User[] = [
-  { id: 'u1', full_name: 'Tăng Ngọc Hậu', email: 'hau@itpm.pro', avatar: '', role: 'Leader' },
-  { id: 'u2', full_name: 'Nguyễn Văn A', email: 'vana@itpm.pro', avatar: '', role: 'Developer' },
-  { id: 'u3', full_name: 'Trần Thị B', email: 'thib@itpm.pro', avatar: '', role: 'Designer' },
-];
-
-const MOCK_DEPTS: Department[] = [
-  { id: 'd1', name: 'Phòng Kỹ Thuật', description: 'Phát triển hệ thống lõi ITPM và AI OCR', color: '#2563EB', member_ids: ['u1', 'u2', 'u3'] },
-  { id: 'd2', name: 'Ban Giám Đốc', description: 'Điều hành chiến lược', color: '#DC2626', member_ids: ['u1'] },
-];
-
-const MOCK_PROJECTS: Project[] = [
-  { id: 'p1', name: 'ITPM Workflow', department_id: 'd1', status: 'active', progress: 65, color: '#2563EB' },
-  { id: 'p2', name: 'AI Japanese Learning', department_id: 'd1', status: 'planning', progress: 20, color: '#7C3AED' },
-];
-
-const MOCK_TASKS: Task[] = [
-  { id: 't1', title: 'Thiết kế Database', project_id: 'p1', status: 'done', priority: 'high', assignee_id: 'u1', attachment_count: 2 },
-  { id: 't2', title: 'Xây dựng API Auth', project_id: 'p1', status: 'in_progress', priority: 'high', assignee_id: 'u2', attachment_count: 0, due_date: '2026-04-20' },
-  { id: 't3', title: 'Vẽ UI Kanban', project_id: 'p1', status: 'review', priority: 'medium', assignee_id: 'u3', attachment_count: 5 },
-  { id: 't4', title: 'Nghiên cứu OCR Engine', project_id: 'p2', status: 'todo', priority: 'high', assignee_id: 'u1', attachment_count: 0, due_date: '2026-04-15' },
-];
-
-const PIE_COLORS = ['#94a3b8', '#3b82f6', '#f59e0b', '#10b981'];
+const getEntityId = (value?: string | { _id?: string; id?: string }) => (
+  typeof value === 'string' ? value : value?._id || value?.id || ''
+);
 
 export default function DepartmentDetail() {
-  const { id: deptId } = useParams();
+  const { id: deptId = '' } = useParams();
+  const { token } = useAuth();
+  const [department, setDepartment] = useState<Department | null>(null);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
   const [activeTab, setActiveTab] = useState('overview');
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState('');
 
-  // --- 2. QUERIES (Giả lập) ---
-  const { data: dept, isLoading: loadingDept } = useQuery({
-    queryKey: ['department', deptId],
-    queryFn: async () => MOCK_DEPTS.find(d => d.id === deptId) || null,
-  });
+  useEffect(() => {
+    void loadData();
+  }, [token, deptId]);
 
-  const { data: projects = [] } = useQuery({
-    queryKey: ['dept-projects', deptId],
-    queryFn: async () => MOCK_PROJECTS.filter(p => p.department_id === deptId),
-  });
+  const loadData = async () => {
+    if (!token || !deptId) return;
 
-  const { data: users = [] } = useQuery({
-    queryKey: ['users'],
-    queryFn: async () => MOCK_USERS,
-  });
+    try {
+      setIsLoading(true);
+      setError('');
+      const [departmentResponse, projectResponse, userResponse] = await Promise.all([
+        departmentService.getDepartment(deptId, token),
+        projectService.getProjects(token, { department_id: deptId, page: 1, limit: 100 }),
+        userService.getUsers(token),
+      ]);
 
-  // --- 3. LOGIC TÍNH TOÁN KPI ---
+      const projectList = projectResponse.data || [];
+      const taskEntries = await Promise.all(projectList.map(async (project) => {
+        try {
+          return await taskService.getProjectTasks(getEntityId(project), token);
+        } catch {
+          return [];
+        }
+      }));
+
+      setDepartment(departmentResponse.data || null);
+      setProjects(projectList);
+      setUsers(userResponse.data || []);
+      setTasks(taskEntries.flat());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Khong tai duoc phong ban');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const deptData = useMemo(() => {
-    if (!dept) return null;
-
-    const members = users.filter(u => dept.member_ids?.includes(u.id));
-    const projectIds = projects.map(p => p.id);
-    const tasks = MOCK_TASKS.filter(t => projectIds.includes(t.project_id));
-
+    if (!department) return null;
+    const memberIds = new Set((department.member_ids || []).map(getEntityId));
+    const members = users.filter((item) => memberIds.has(getEntityId(item)) || getEntityId(item.department_id) === deptId);
     const totalTasks = tasks.length;
-    const doneTasks = tasks.filter(t => t.status === 'done').length;
-    const inProgressTasks = tasks.filter(t => t.status === 'in_progress').length;
-    const overdueTasks = tasks.filter(t => t.due_date && new Date(t.due_date) < new Date() && t.status !== 'done').length;
-    
+    const doneTasks = tasks.filter((task) => task.status === 'done').length;
+    const inProgressTasks = tasks.filter((task) => task.status === 'in_progress').length;
+    const overdueTasks = tasks.filter((task) => task.due_date && new Date(task.due_date) < new Date() && task.status !== 'done').length;
     const kpiProgress = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0;
+    const statusChartData = (Object.keys(STATUS_LABELS) as TaskStatus[]).map((status) => ({
+      name: STATUS_LABELS[status],
+      value: tasks.filter((task) => task.status === status).length,
+    }));
 
-    const statusChartData = [
-      { name: 'Cần làm', value: tasks.filter(t => t.status === 'todo').length },
-      { name: 'Đang làm', value: tasks.filter(t => t.status === 'in_progress').length },
-      { name: 'Đang duyệt', value: tasks.filter(t => t.status === 'review').length },
-      { name: 'Hoàn thành', value: tasks.filter(t => t.status === 'done').length },
-    ];
+    return { members, stats: { totalTasks, doneTasks, inProgressTasks, overdueTasks, kpiProgress }, statusChartData };
+  }, [department, users, tasks, deptId]);
 
-    return { members, tasks, stats: { totalTasks, doneTasks, inProgressTasks, overdueTasks, kpiProgress }, statusChartData };
-  }, [dept, projects, users]);
+  if (isLoading) {
+    return <div className="flex justify-center py-32"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
+  }
 
-  if (loadingDept) return <div className="flex justify-center py-32"><Loader2 className="animate-spin text-primary" /></div>;
-  if (!dept || !deptData) return <div className="p-10 text-center">Không tìm thấy phòng ban.</div>;
+  if (error) {
+    return <div className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</div>;
+  }
+
+  if (!department || !deptData) {
+    return <div className="p-10 text-center text-sm text-slate-500">Khong tim thay phong ban.</div>;
+  }
 
   return (
     <div className="space-y-6 pb-10">
-      {/* Header */}
       <div className="flex items-center gap-4">
-        <Link to="/departments" className="p-2 hover:bg-accent rounded-full transition-colors">
-          <ArrowLeft className="w-5 h-5 text-muted-foreground" />
+        <Link to="/departments" className="rounded-full p-2 transition-colors hover:bg-accent">
+          <ArrowLeft className="h-5 w-5 text-muted-foreground" />
         </Link>
         <div>
           <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold tracking-tight">{dept.name}</h1>
-            <Badge variant="outline" className="border-primary/20 text-primary">Phòng ban</Badge>
+            <h1 className="text-2xl font-bold tracking-tight">{department.name}</h1>
+            <Badge variant="outline" className="border-primary/20 text-primary">{department.code || 'Phong ban'}</Badge>
           </div>
-          <p className="text-sm text-muted-foreground mt-1">{dept.description}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{department.description || 'Chua co mo ta.'}</p>
         </div>
       </div>
 
-      {/* KPI Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard title="Tổng công việc" value={deptData.stats.totalTasks} icon={ListChecks} color="blue" />
-        <StatCard title="Đang thực hiện" value={deptData.stats.inProgressTasks} icon={Clock} color="orange" />
-        <StatCard title="Việc trễ hạn" value={deptData.stats.overdueTasks} icon={AlertTriangle} color="red" />
-        <StatCard title="KPI Hoàn thành" value={`${deptData.stats.kpiProgress}%`} icon={TrendingUp} color="green" />
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <StatCard title="Tong cong viec" value={deptData.stats.totalTasks} icon={ListChecks} color="blue" />
+        <StatCard title="Dang thuc hien" value={deptData.stats.inProgressTasks} icon={Clock} color="orange" />
+        <StatCard title="Viec tre han" value={deptData.stats.overdueTasks} icon={AlertTriangle} color="red" />
+        <StatCard title="KPI hoan thanh" value={`${deptData.stats.kpiProgress}%`} icon={TrendingUp} color="green" />
       </div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="grid w-full grid-cols-3 lg:w-[400px]">
-          <TabsTrigger value="overview">Tổng quan</TabsTrigger>
-          <TabsTrigger value="projects">Dự án</TabsTrigger>
-          <TabsTrigger value="members">Thành viên</TabsTrigger>
+          <TabsTrigger value="overview">Tong quan</TabsTrigger>
+          <TabsTrigger value="projects">Du an</TabsTrigger>
+          <TabsTrigger value="members">Thanh vien</TabsTrigger>
         </TabsList>
 
-        {/* OVERVIEW CONTENT */}
-        <TabsContent value="overview" className="mt-6 space-y-6">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div className="bg-card p-6 rounded-xl border border-border shadow-sm">
-              <h3 className="text-sm font-bold uppercase tracking-wider mb-6">Trạng thái công việc</h3>
-              <div className="h-[250px]">
+        <TabsContent value="overview" className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <section className="rounded-lg border border-border bg-card p-6">
+            <h3 className="mb-6 text-sm font-bold uppercase tracking-wide">Trang thai cong viec</h3>
+            <div className="h-[250px]">
+              {tasks.length === 0 ? (
+                <div className="flex h-full items-center justify-center text-sm text-muted-foreground">Chua co du lieu task.</div>
+              ) : (
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
-                    <Pie data={deptData.statusChartData} cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value" strokeWidth={0}>
-                      {deptData.statusChartData.map((_, index) => (
-                        <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
-                      ))}
+                    <Pie data={deptData.statusChartData} cx="50%" cy="50%" innerRadius={60} outerRadius={82} paddingAngle={4} dataKey="value" strokeWidth={0}>
+                      {deptData.statusChartData.map((_, index) => <Cell key={index} fill={PIE_COLORS[index % PIE_COLORS.length]} />)}
                     </Pie>
                     <Tooltip />
                   </PieChart>
                 </ResponsiveContainer>
-              </div>
-              <div className="flex justify-center gap-4 mt-4">
-                {deptData.statusChartData.map((item, i) => (
-                  <div key={i} className="flex items-center gap-1.5 text-xs font-medium">
-                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: PIE_COLORS[i] }} />
-                    {item.name}
-                  </div>
-                ))}
-              </div>
+              )}
             </div>
+          </section>
 
-            <div className="bg-card p-6 rounded-xl border border-border shadow-sm">
-              <h3 className="text-sm font-bold uppercase tracking-wider mb-6">Tiến độ dự án trực thuộc</h3>
-              <div className="space-y-6">
-                {projects.map(project => (
-                  <div key={project.id} className="space-y-2">
+          <section className="rounded-lg border border-border bg-card p-6">
+            <h3 className="mb-6 text-sm font-bold uppercase tracking-wide">Tien do du an truc thuoc</h3>
+            <div className="space-y-5">
+              {projects.length === 0 ? (
+                <p className="text-sm text-muted-foreground">Chua co du an nao trong phong ban.</p>
+              ) : projects.map((project) => {
+                const projectTasks = tasks.filter((task) => getEntityId(task.project_id) === getEntityId(project));
+                const done = projectTasks.filter((task) => task.status === 'done').length;
+                const progress = projectTasks.length ? Math.round((done / projectTasks.length) * 100) : project.progress || 0;
+                return (
+                  <div key={getEntityId(project)} className="space-y-2">
                     <div className="flex justify-between text-sm">
                       <span className="font-semibold">{project.name}</span>
-                      <span className="font-bold text-primary">{project.progress}%</span>
+                      <span className="font-bold text-primary">{progress}%</span>
                     </div>
-                    <div className="w-full bg-accent h-2 rounded-full overflow-hidden">
-                      <div className="h-full bg-primary transition-all duration-500" style={{ width: `${project.progress}%`, backgroundColor: project.color }} />
+                    <div className="h-2 overflow-hidden rounded-full bg-accent">
+                      <div className="h-full transition-all" style={{ width: `${progress}%`, backgroundColor: project.color || '#2563EB' }} />
                     </div>
                   </div>
-                ))}
-                {projects.length === 0 && <p className="text-sm text-muted-foreground italic">Chưa có dự án nào.</p>}
-              </div>
+                );
+              })}
             </div>
-          </div>
+          </section>
         </TabsContent>
 
-        {/* PROJECTS CONTENT */}
-        <TabsContent value="projects" className="mt-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {projects.map(p => (
-              <Link key={p.id} to={`/projects/${p.id}`} className="block p-4 bg-card border border-border rounded-xl hover:border-primary/50 transition-all">
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: p.color + '15' }}>
-                    <FolderKanban className="w-4 h-4" style={{ color: p.color }} />
-                  </div>
-                  <h4 className="font-bold">{p.name}</h4>
-                  <Badge className="ml-auto capitalize">{p.status}</Badge>
+        <TabsContent value="projects" className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
+          {projects.map((project) => (
+            <Link key={getEntityId(project)} to={`/projects/${getEntityId(project)}`} className="block rounded-lg border border-border bg-card p-4 transition hover:border-primary/50">
+              <div className="mb-3 flex items-center gap-3">
+                <div className="flex h-8 w-8 items-center justify-center rounded-md" style={{ backgroundColor: `${project.color || '#2563EB'}20` }}>
+                  <FolderKanban className="h-4 w-4" style={{ color: project.color || '#2563EB' }} />
                 </div>
-                <p className="text-xs text-muted-foreground line-clamp-1 mb-4">Mã dự án: {p.id.toUpperCase()}</p>
-                <div className="flex items-center justify-between text-[10px] font-bold uppercase text-muted-foreground">
-                  <span>Tiến độ</span>
-                  <span>{p.progress}%</span>
-                </div>
-              </Link>
-            ))}
-          </div>
+                <h4 className="font-bold">{project.name}</h4>
+                <Badge className="ml-auto capitalize">{project.status}</Badge>
+              </div>
+              <p className="text-xs text-muted-foreground">{project.description || 'Khong co mo ta.'}</p>
+            </Link>
+          ))}
+          {projects.length === 0 && <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">Chua co du an.</div>}
         </TabsContent>
 
-        {/* MEMBERS CONTENT */}
         <TabsContent value="members" className="mt-6">
-          <div className="bg-card rounded-xl border border-border overflow-hidden">
-            <table className="w-full text-left">
-              <thead className="bg-accent/50 border-b border-border">
-                <tr>
-                  <th className="p-4 text-[10px] font-bold uppercase">Thành viên</th>
-                  <th className="p-4 text-[10px] font-bold uppercase">Vai trò</th>
-                  <th className="p-4 text-[10px] font-bold uppercase text-right">Hành động</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {deptData.members.map(member => (
-                  <tr key={member.id} className="hover:bg-accent/20 transition-colors">
-                    <td className="p-4">
-                      <div className="flex items-center gap-3">
-                        <Avatar className="h-8 w-8">
-                          <AvatarFallback className="text-[10px] font-bold">{member.full_name[0]}</AvatarFallback>
-                        </Avatar>
-                        <div className="min-w-0">
-                          <p className="text-sm font-bold truncate">{member.full_name}</p>
-                          <p className="text-[10px] text-muted-foreground truncate">{member.email}</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="p-4">
-                      <Badge variant="secondary" className="text-[10px]">{member.role}</Badge>
-                    </td>
-                    <td className="p-4 text-right">
-                      <Button variant="ghost" size="sm" className="text-xs font-bold text-primary">Hồ sơ</Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="overflow-hidden rounded-lg border border-border bg-card">
+            <div className="flex items-center gap-2 border-b bg-accent/40 px-4 py-3 text-sm font-semibold">
+              <Users className="h-4 w-4" />
+              Thanh vien ({deptData.members.length})
+            </div>
+            <div className="divide-y divide-border">
+              {deptData.members.map((member) => (
+                <div key={getEntityId(member)} className="grid gap-3 px-4 py-3 md:grid-cols-[minmax(0,1fr)_140px_180px] md:items-center">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <Avatar className="h-8 w-8">
+                      <AvatarImage src={member.avatar} />
+                      <AvatarFallback className="text-[10px] font-bold">{member.full_name[0]}</AvatarFallback>
+                    </Avatar>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-bold">{member.full_name}</p>
+                      <p className="truncate text-xs text-muted-foreground">{member.email}</p>
+                    </div>
+                  </div>
+                  <Badge variant="secondary" className="w-fit text-xs capitalize">{member.role}</Badge>
+                  <p className="text-xs text-muted-foreground">{member.position_title || 'Chua gan chuc vu'}</p>
+                </div>
+              ))}
+              {deptData.members.length === 0 && <div className="p-8 text-center text-sm text-muted-foreground">Chua co thanh vien.</div>}
+            </div>
           </div>
         </TabsContent>
       </Tabs>
@@ -230,23 +223,22 @@ export default function DepartmentDetail() {
   );
 }
 
-// Helper Component cho Stat Cards
-function StatCard({ title, value, icon: Icon, color }: any) {
-  const colorMap: any = {
-    blue: "bg-blue-50 text-blue-600 border-blue-100",
-    orange: "bg-orange-50 text-orange-600 border-orange-100",
-    red: "bg-red-50 text-red-600 border-red-100",
-    green: "bg-green-50 text-green-600 border-green-100",
+function StatCard({ title, value, icon: Icon, color }: { title: string; value: number | string; icon: typeof ListChecks; color: 'blue' | 'orange' | 'red' | 'green' }) {
+  const colorMap = {
+    blue: 'bg-blue-50 text-blue-600 border-blue-100',
+    orange: 'bg-orange-50 text-orange-600 border-orange-100',
+    red: 'bg-red-50 text-red-600 border-red-100',
+    green: 'bg-green-50 text-green-600 border-green-100',
   };
 
   return (
-    <div className={cn("p-5 rounded-xl border shadow-sm flex items-start justify-between bg-card", colorMap[color])}>
+    <div className={cn('flex items-start justify-between rounded-lg border bg-card p-5', colorMap[color])}>
       <div>
-        <p className="text-[10px] font-bold uppercase tracking-wider opacity-80">{title}</p>
-        <p className="text-2xl font-black mt-1">{value}</p>
+        <p className="text-[10px] font-bold uppercase tracking-wide opacity-80">{title}</p>
+        <p className="mt-1 text-2xl font-black">{value}</p>
       </div>
-      <div className="p-2 bg-white/50 rounded-lg">
-        <Icon className="w-5 h-5" />
+      <div className="rounded-md bg-white/60 p-2">
+        <Icon className="h-5 w-5" />
       </div>
     </div>
   );

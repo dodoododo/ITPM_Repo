@@ -1,210 +1,443 @@
-import { useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { 
-  PieChart, Pie, Cell, ResponsiveContainer, 
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, 
-  Tooltip as RechartsTooltip, Legend 
+import { useEffect, useMemo, useState } from 'react';
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip as RechartsTooltip,
+  XAxis,
+  YAxis,
 } from 'recharts';
-import { ListChecks, AlertTriangle, TrendingUp, Clock, Loader2, type LucideIcon } from 'lucide-react';
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Clock3,
+  Filter,
+  ListChecks,
+  Loader2,
+  TrendingUp,
+  Trophy,
+} from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { useAuth } from '@/hooks/useAuth';
+import {
+  analyticsService,
+  type AnalyticsRange,
+  type AnalyticsSummary,
+  type PerformanceRow,
+} from '@/services/analyticsService';
 import { cn } from '@/lib/utils';
-// Import Type chuẩn từ file index.ts của bạn
-import { type Task, type User, type Project, type TaskStatus } from '@/types';
+import type { Project } from '@/types';
 
-// --- 1. Mock Data (Thay thế base44) ---
-const MOCK_USERS: User[] = [
-  { id: 'u1', full_name: 'Tăng Ngọc Hậu', email: 'hau@itpm.pro', avatar: '' },
-  { id: 'u2', full_name: 'Nguyễn Văn A', email: 'vana@itpm.pro', avatar: '' },
-];
+type StatusKey = 'todo' | 'in_progress' | 'review' | 'needs_revision' | 'done';
 
-const MOCK_PROJECTS: Project[] = [
-  { id: 'p1', name: 'Hệ thống Quản lý ITPM', status: 'active', progress: 45, color: '#2563EB' },
-  { id: 'p2', name: 'App AI Japanese', status: 'planning', progress: 10, color: '#7C3AED' },
-];
-
-const MOCK_TASKS: Task[] = [
-  { id: 't1', title: 'Thiết kế Dashboard', project_id: 'p1', status: 'in_progress', priority: 'high', attachment_count: 2, assignee_id: 'u1', due_date: '2026-05-01' },
-  { id: 't2', title: 'Fix bug Login', project_id: 'p1', status: 'done', priority: 'medium', attachment_count: 0, assignee_id: 'u1' },
-  { id: 't3', title: 'Cấu hình Server', project_id: 'p2', status: 'todo', priority: 'high', attachment_count: 5, assignee_id: 'u2', due_date: '2026-04-20' },
-];
-
-const STATUS_CONFIG: Record<TaskStatus, { label: string; dot: string }> = {
-  todo: { label: 'Cần làm', dot: 'bg-slate-400' },
-  in_progress: { label: 'Đang làm', dot: 'bg-blue-500' },
-  review: { label: 'Chờ duyệt', dot: 'bg-amber-500' },
-  done: { label: 'Hoàn thành', dot: 'bg-emerald-500' },
+const EMPTY_SUMMARY: AnalyticsSummary = {
+  total: 0,
+  done: 0,
+  in_progress: 0,
+  review: 0,
+  needs_revision: 0,
+  todo: 0,
+  overdue: 0,
+  kpi: 0,
 };
 
-const PIE_COLORS = ['#94a3b8', '#3b82f6', '#f59e0b', '#10b981'];
+const STATUS_CONFIG: Array<{ key: StatusKey; label: string; fill: string }> = [
+  { key: 'todo', label: 'Todo', fill: '#64748b' },
+  { key: 'in_progress', label: 'Doing', fill: '#2563eb' },
+  { key: 'review', label: 'Review', fill: '#d97706' },
+  { key: 'needs_revision', label: 'Needs Revision', fill: '#ef4444' },
+  { key: 'done', label: 'Done', fill: '#059669' },
+];
 
-// --- 2. StatCard Component với Props chuẩn ---
-interface StatCardProps {
-  title: string;
-  value: string | number;
-  subtitle?: string;
-  icon?: LucideIcon;
-  trend?: string;
-  trendUp?: boolean;
-}
+const getProjectId = (project: Project) => project._id || project.id;
 
-function StatCard({ title, value, subtitle, icon: Icon, trend, trendUp }: StatCardProps) {
+const getShortName = (name: string, email: string) => {
+  const trimmed = name?.trim();
+  if (!trimmed) return email;
+  const parts = trimmed.split(/\s+/);
+  return parts.length > 2 ? parts.slice(-2).join(' ') : trimmed;
+};
+
+export default function Dashboard() {
+  const { token } = useAuth();
+  const [range, setRange] = useState<AnalyticsRange>('month');
+  const [projectId, setProjectId] = useState('all');
+  const [summary, setSummary] = useState<AnalyticsSummary>(EMPTY_SUMMARY);
+  const [performance, setPerformance] = useState<PerformanceRow[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!token) {
+      setLoading(false);
+      return;
+    }
+
+    let active = true;
+    const params = { range, projectId };
+
+    const loadAnalytics = async () => {
+      setLoading(true);
+      setError(null);
+
+      try {
+        const [summaryData, performanceData, projectData] = await Promise.all([
+          analyticsService.getSummary(token, params),
+          analyticsService.getPerformance(token, params),
+          analyticsService.getProjects(token),
+        ]);
+
+        if (!active) return;
+        setSummary(summaryData);
+        setPerformance(performanceData);
+        setProjects(projectData);
+      } catch (err) {
+        if (!active) return;
+        setError(err instanceof Error ? err.message : 'Khong tai duoc du lieu dashboard');
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+
+    void loadAnalytics();
+
+    return () => {
+      active = false;
+    };
+  }, [token, range, projectId]);
+
+  const statusData = useMemo(
+    () =>
+      STATUS_CONFIG.map((status) => ({
+        ...status,
+        value: summary[status.key],
+      })).filter((status) => status.value > 0),
+    [summary]
+  );
+
+  const performanceChart = useMemo(
+    () =>
+      performance.slice(0, 8).map((row) => ({
+        ...row,
+        name: getShortName(row.full_name, row.email),
+      })),
+    [performance]
+  );
+
+  const selectedProject = projects.find((project) => getProjectId(project) === projectId);
+  const periodLabel = range === 'week' ? 'Tuan nay' : 'Thang nay';
+  const completionRate = summary.total > 0 ? Math.round((summary.done / summary.total) * 100) : 0;
+
   return (
-    <div className="bg-card rounded-xl border border-border p-5 hover:shadow-md transition-shadow">
-      <div className="flex items-start justify-between">
-        <div className="flex-1">
-          <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider">{title}</p>
-          <p className="text-3xl font-bold text-foreground mt-2 tracking-tight">{value}</p>
-          {subtitle && <p className="text-xs text-muted-foreground mt-1 font-medium">{subtitle}</p>}
-          {trend && (
-            <p className={cn("text-[10px] font-bold mt-2 uppercase", trendUp ? "text-emerald-600" : "text-destructive")}>
-              {trendUp ? "↑" : "↓"} {trend}
+    <div className="flex h-[calc(100vh-101px)] flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+      <div className="flex-shrink-0 border-b border-slate-200 bg-white px-5 py-4">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h1 className="text-[18px] font-bold tracking-tight text-slate-950">Dashboard KPI noi bo</h1>
+            <p className="mt-1 text-[12px] font-medium text-slate-500">
+              Tong quan cong viec, tien do, qua han va hieu suat nhan su theo bo loc hien tai.
             </p>
-          )}
-        </div>
-        {Icon && (
-          <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
-            <Icon className="w-5 h-5 text-primary" />
           </div>
-        )}
+
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <div className="flex h-8 rounded-md border border-slate-200 bg-slate-100 p-0.5">
+              <button
+                type="button"
+                onClick={() => setRange('week')}
+                className={cn(
+                  'rounded px-3 text-[12px] font-bold transition-colors',
+                  range === 'week' ? 'bg-white text-slate-950 shadow-sm' : 'text-slate-500 hover:text-slate-800'
+                )}
+              >
+                Tuan
+              </button>
+              <button
+                type="button"
+                onClick={() => setRange('month')}
+                className={cn(
+                  'rounded px-3 text-[12px] font-bold transition-colors',
+                  range === 'month' ? 'bg-white text-slate-950 shadow-sm' : 'text-slate-500 hover:text-slate-800'
+                )}
+              >
+                Thang
+              </button>
+            </div>
+
+            <div className="relative">
+              <Filter className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+              <select
+                value={projectId}
+                onChange={(event) => setProjectId(event.target.value)}
+                className="h-8 min-w-[220px] rounded-md border border-slate-200 bg-white pl-8 pr-3 text-[12px] font-semibold text-slate-700 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+              >
+                <option value="all">Tat ca du an</option>
+                {projects.map((project) => (
+                  <option key={getProjectId(project)} value={getProjectId(project)}>
+                    {project.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-auto bg-[#f3f4f6] p-4">
+        <div className="mx-auto max-w-[1480px] space-y-4">
+          {error && (
+            <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-[13px] font-semibold text-red-700">
+              {error}
+            </div>
+          )}
+
+          <div className="flex items-center justify-between">
+            <p className="text-[12px] font-semibold text-slate-500">
+              Bo loc: <span className="text-slate-900">{periodLabel}</span>
+              <span className="mx-2 text-slate-300">/</span>
+              <span className="text-slate-900">{selectedProject?.name || 'Tat ca du an'}</span>
+            </p>
+            {loading && (
+              <div className="flex items-center gap-2 text-[12px] font-semibold text-slate-500">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                Dang cap nhat
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
+            <StatCard title="Tong cong viec" value={summary.total} icon={ListChecks} tone="blue" />
+            <StatCard title="Hoan thanh" value={summary.done} icon={CheckCircle2} tone="emerald" />
+            <StatCard title="Dang lam" value={summary.in_progress} icon={Clock3} tone="blue" />
+            <StatCard title="Qua han" value={summary.overdue} icon={AlertTriangle} tone="red" />
+            <StatCard title="KPI trung binh" value={`${summary.kpi}%`} icon={TrendingUp} tone="emerald" />
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
+            <section className="enterprise-panel p-4 xl:col-span-4">
+              <SectionHeader title="Trang thai cong viec" description="Phan bo task theo trang thai xu ly." />
+              <div className="h-[250px]">
+                {statusData.length === 0 ? (
+                  <EmptyChart />
+                ) : (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={statusData}
+                        dataKey="value"
+                        nameKey="label"
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={58}
+                        outerRadius={88}
+                        paddingAngle={2}
+                        strokeWidth={0}
+                      >
+                        {statusData.map((entry) => (
+                          <Cell key={entry.key} fill={entry.fill} />
+                        ))}
+                      </Pie>
+                      <RechartsTooltip contentStyle={tooltipStyle} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {STATUS_CONFIG.map((status) => (
+                  <div key={status.key} className="flex items-center justify-between rounded-md bg-slate-50 px-3 py-2">
+                    <span className="flex items-center gap-2 text-[12px] font-semibold text-slate-600">
+                      <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: status.fill }} />
+                      {status.label}
+                    </span>
+                    <span className="text-[12px] font-extrabold text-slate-900">{summary[status.key]}</span>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <section className="enterprise-panel p-4 xl:col-span-5">
+              <SectionHeader title="Hieu suat ca nhan" description="So sanh tong task duoc giao va task da hoan thanh." />
+              <div className="h-[328px]">
+                {performanceChart.length === 0 ? (
+                  <EmptyChart />
+                ) : (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={performanceChart} layout="vertical" margin={{ top: 8, right: 24, bottom: 8, left: 8 }}>
+                      <CartesianGrid stroke="#e2e8f0" strokeDasharray="3 3" horizontal={false} />
+                      <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11, fill: '#64748b' }} />
+                      <YAxis
+                        type="category"
+                        dataKey="name"
+                        width={104}
+                        tickLine={false}
+                        axisLine={false}
+                        tick={{ fontSize: 11, fill: '#475569' }}
+                      />
+                      <RechartsTooltip contentStyle={tooltipStyle} />
+                      <Bar dataKey="total" name="Duoc giao" fill="#cbd5e1" radius={[0, 5, 5, 0]} barSize={12} />
+                      <Bar dataKey="done" name="Hoan thanh" fill="#059669" radius={[0, 5, 5, 0]} barSize={12} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
+              </div>
+            </section>
+
+            <section className="enterprise-panel p-4 xl:col-span-3">
+              <SectionHeader title="KPI theo thang" description="Chi so nhanh tu bo loc hien tai." />
+              <div className="mt-4 space-y-4">
+                <KpiMeter label="Hoan thanh" value={completionRate} color="bg-emerald-500" />
+                <KpiMeter label="KPI trung binh" value={summary.kpi} color="bg-blue-500" />
+                <KpiMeter label="Task dung tien do" value={Math.max(0, 100 - Math.min(summary.overdue * 10, 100))} color="bg-amber-500" />
+              </div>
+              <div className="mt-5 rounded-md border border-slate-200 bg-slate-50 p-3">
+                <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Tin hieu can chu y</p>
+                <p className="mt-2 text-[13px] font-semibold text-slate-800">
+                  {summary.overdue > 0 ? `${summary.overdue} cong viec dang qua han` : 'Khong co cong viec qua han'}
+                </p>
+              </div>
+            </section>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
+            <section className="enterprise-panel xl:col-span-5">
+              <div className="border-b border-slate-100 px-4 py-3">
+                <SectionHeader title="Tien do du an" description="Theo doi nhanh cac workspace dang chay." />
+              </div>
+              <div className="divide-y divide-slate-100">
+                {projects.length === 0 ? (
+                  <div className="px-4 py-10 text-center text-[13px] text-slate-500">Chua co du lieu du an.</div>
+                ) : (
+                  projects.slice(0, 8).map((project) => (
+                    <div key={getProjectId(project)} className="px-4 py-3">
+                      <div className="mb-2 flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-[13px] font-bold text-slate-900">{project.name}</p>
+                          <p className="text-[11px] font-semibold uppercase text-slate-400">{project.status}</p>
+                        </div>
+                        <span className="text-[12px] font-extrabold text-slate-800">{project.progress || 0}%</span>
+                      </div>
+                      <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
+                        <div className="h-full rounded-full bg-emerald-500" style={{ width: `${project.progress || 0}%` }} />
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </section>
+
+            <section className="enterprise-panel xl:col-span-7">
+              <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+                <SectionHeader title="Bang xep hang nhan su" description="Sap xep theo ty le hoan thanh trong bo loc." />
+                <Trophy className="h-4 w-4 text-amber-500" />
+              </div>
+              <div className="divide-y divide-slate-100">
+                {performance.length === 0 ? (
+                  <div className="px-4 py-10 text-center text-[13px] text-slate-500">Chua co du lieu hieu suat.</div>
+                ) : (
+                  performance.map((row, index) => (
+                    <div key={row.user_id} className="grid gap-3 px-4 py-3 md:grid-cols-[40px_minmax(0,1fr)_110px_180px] md:items-center">
+                      <div className="flex h-7 w-7 items-center justify-center rounded-md bg-slate-100 text-[12px] font-extrabold text-slate-600">
+                        {index + 1}
+                      </div>
+                      <div className="flex min-w-0 items-center gap-3">
+                        <Avatar className="h-8 w-8">
+                          <AvatarImage src={row.avatar} />
+                          <AvatarFallback className="bg-slate-100 text-[11px] font-bold text-slate-600">
+                            {row.full_name?.[0] || row.email?.[0] || 'U'}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div className="min-w-0">
+                          <p className="truncate text-[13px] font-bold text-slate-900">{row.full_name || row.email}</p>
+                          <p className="truncate text-[12px] text-slate-500">{row.email}</p>
+                        </div>
+                      </div>
+                      <p className="text-[12px] font-semibold text-slate-600">
+                        {row.done}/{row.total} done
+                      </p>
+                      <div className="flex items-center gap-3">
+                        <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-100">
+                          <div className="h-full rounded-full bg-emerald-600" style={{ width: `${row.completion_rate}%` }} />
+                        </div>
+                        <span className="w-10 text-right text-[12px] font-extrabold text-slate-900">{row.completion_rate}%</span>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </section>
+          </div>
+        </div>
       </div>
     </div>
   );
 }
 
-export default function Dashboard() {
-  // Queries sử dụng Mock Data
-  const { data: tasks = [], isLoading: loadingTasks } = useQuery<Task[]>({
-    queryKey: ['tasks'],
-    queryFn: async () => MOCK_TASKS,
-  });
-  
-  const { data: projects = [], isLoading: loadingProjects } = useQuery<Project[]>({
-    queryKey: ['projects'],
-    queryFn: async () => MOCK_PROJECTS,
-  });
+const tooltipStyle = {
+  borderRadius: 8,
+  border: '1px solid #e2e8f0',
+  boxShadow: '0 10px 25px rgb(15 23 42 / 0.08)',
+  fontSize: 12,
+};
 
-  const { data: users = [] } = useQuery<User[]>({
-    queryKey: ['users'],
-    queryFn: async () => MOCK_USERS,
-    staleTime: 5 * 60 * 1000,
-  });
+function SectionHeader({ title, description }: { title: string; description: string }) {
+  return (
+    <div>
+      <h2 className="text-[12px] font-extrabold uppercase tracking-wide text-slate-800">{title}</h2>
+      <p className="mt-1 text-[12px] font-medium text-slate-500">{description}</p>
+    </div>
+  );
+}
 
-  const isLoading = loadingTasks || loadingProjects;
+function EmptyChart() {
+  return <div className="flex h-full items-center justify-center text-[13px] font-medium text-slate-400">Khong co du lieu</div>;
+}
 
-  // Tính toán số liệu (Dùng useMemo để tối ưu)
-  const stats = useMemo(() => {
-    const total = tasks.length;
-    const overdue = tasks.filter(t => t.due_date && new Date(t.due_date) < new Date() && t.status !== 'done').length;
-    const done = tasks.filter(t => t.status === 'done').length;
-    const inProgress = tasks.filter(t => t.status === 'in_progress').length;
-    const kpi = total > 0 ? Math.round((done / total) * 100) : 0;
-
-    return { total, overdue, done, inProgress, kpi };
-  }, [tasks]);
-
-  const statusData = useMemo(() => 
-    Object.entries(STATUS_CONFIG).map(([key, cfg]) => ({
-      name: cfg.label,
-      value: tasks.filter(t => t.status === key).length,
-    })), [tasks]);
-
-  const userMap = useMemo(() => 
-    Object.fromEntries(users.map((u: User) => [u.id, u])), [users]);
-
-  const performanceData = useMemo(() => 
-    users.map((u: User) => {
-      const userTasks = tasks.filter(t => t.assignee_id === u.id);
-      return {
-        name: u.full_name?.split(' ').pop() || '?',
-        fullName: u.full_name,
-        done: userTasks.filter(t => t.status === 'done').length,
-        total: userTasks.length,
-      };
-    }).filter(d => d.total > 0), [tasks, users]);
-
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center py-32">
-        <Loader2 className="w-8 h-8 animate-spin text-primary" />
-      </div>
-    );
-  }
+function KpiMeter({ label, value, color }: { label: string; value: number; color: string }) {
+  const bounded = Math.max(0, Math.min(100, Math.round(value || 0)));
 
   return (
-    <div className="space-y-8 pb-8">
-      <div>
-        <h1 className="text-2xl font-bold text-foreground tracking-tight">Dashboard Quản Trị</h1>
-        <p className="text-muted-foreground text-sm mt-1">Hệ thống đo lường hiệu suất và tiến độ dự án real-time.</p>
+    <div>
+      <div className="mb-1.5 flex items-center justify-between">
+        <span className="text-[12px] font-bold text-slate-700">{label}</span>
+        <span className="text-[12px] font-extrabold text-slate-900">{bounded}%</span>
       </div>
-
-      {/* Grid Chỉ số */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-        <StatCard title="Tổng công việc" value={stats.total} subtitle={`${projects.length} dự án đang chạy`} icon={ListChecks} />
-        <StatCard title="Đang thực hiện" value={stats.inProgress} subtitle="Task đang được xử lý" icon={Clock} />
-        <StatCard title="Trễ hạn" value={stats.overdue} trend={stats.overdue === 0 ? "An toàn" : "Cảnh báo"} trendUp={stats.overdue === 0} icon={AlertTriangle} />
-        <StatCard title="KPI Hoàn thành" value={`${stats.kpi}%`} trend={stats.kpi > 70 ? "Vượt chỉ tiêu" : "Cần cố gắng"} trendUp={stats.kpi > 70} icon={TrendingUp} />
+      <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+        <div className={cn('h-full rounded-full', color)} style={{ width: `${bounded}%` }} />
       </div>
+    </div>
+  );
+}
 
-      {/* Biểu đồ */}
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-        <div className="lg:col-span-2 bg-card rounded-xl border border-border p-6 shadow-sm">
-          <h3 className="text-sm font-bold text-foreground mb-6 uppercase tracking-wider">Trạng thái công việc</h3>
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie data={statusData} cx="50%" cy="50%" innerRadius={60} outerRadius={85} paddingAngle={5} dataKey="value" strokeWidth={0}>
-                  {statusData.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
-                </Pie>
-                <RechartsTooltip />
-                <Legend verticalAlign="bottom" iconType="circle" wrapperStyle={{ fontSize: '10px', paddingTop: '20px' }} />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
+function StatCard({
+  title,
+  value,
+  icon: Icon,
+  tone,
+}: {
+  title: string;
+  value: number | string;
+  icon: typeof ListChecks;
+  tone: 'blue' | 'red' | 'emerald';
+}) {
+  const tones = {
+    blue: 'border-blue-100 bg-blue-50 text-blue-700',
+    red: 'border-red-100 bg-red-50 text-red-700',
+    emerald: 'border-emerald-100 bg-emerald-50 text-emerald-700',
+  };
+
+  return (
+    <div className="enterprise-panel p-4">
+      <div className="flex items-center gap-3">
+        <div className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-md border', tones[tone])}>
+          <Icon className="h-4.5 w-4.5" />
         </div>
-
-        <div className="lg:col-span-3 bg-card rounded-xl border border-border p-6 shadow-sm">
-          <h3 className="text-sm font-bold text-foreground mb-6 uppercase tracking-wider">Hiệu suất nhân viên</h3>
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={performanceData}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
-                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} />
-                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} />
-                <RechartsTooltip cursor={{ fill: 'hsl(var(--accent)/0.5)' }} />
-                <Bar dataKey="total" fill="hsl(var(--primary)/0.2)" radius={[4, 4, 0, 0]} name="Tổng giao" />
-                <Bar dataKey="done" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} name="Đã xong" />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-      </div>
-
-      {/* Tiến độ dự án */}
-      <div className="bg-card rounded-xl border border-border p-6 shadow-sm">
-        <h3 className="text-sm font-bold text-foreground mb-6 uppercase tracking-wider">Theo dõi tiến độ dự án</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-          {projects.map((project: Project) => {
-            const projTasks = tasks.filter((t: Task) => t.project_id === project.id);
-            const done = projTasks.filter((t: Task) => t.status === 'done').length;
-            const pct = projTasks.length > 0 ? Math.round((done / projTasks.length) * 100) : project.progress || 0;
-            return (
-              <div key={project.id} className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: project.color || '#2563EB' }} />
-                    <span className="text-sm font-bold text-foreground">{project.name}</span>
-                  </div>
-                  <span className="text-xs font-bold text-primary">{pct}%</span>
-                </div>
-                <div className="w-full bg-accent/50 rounded-full h-2">
-                  <div 
-                    className="rounded-full h-2 transition-all duration-700 ease-in-out" 
-                    style={{ width: `${pct}%`, backgroundColor: project.color || '#2563EB' }} 
-                  />
-                </div>
-              </div>
-            );
-          })}
+        <div className="min-w-0">
+          <p className="text-[10px] font-extrabold uppercase tracking-wide text-slate-500">{title}</p>
+          <p className="mt-1 text-[24px] font-black leading-none tracking-tight text-slate-900">{value}</p>
         </div>
       </div>
     </div>
