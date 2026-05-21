@@ -6,7 +6,7 @@
 import type { User } from './user.types';
 import type { Project } from './project.types';
 
-export type TaskStatus = 'todo' | 'in_progress' | 'review' | 'done';
+export type TaskStatus = 'todo' | 'in_progress' | 'review' | 'needs_revision' | 'done';
 export type TaskPriority = 'low' | 'medium' | 'high' | 'urgent';
 export type Priority = TaskPriority;
 export type ReviewStatus = 'pending' | 'approved' | 'rejected';
@@ -16,14 +16,28 @@ export interface Attachment {
   file_url: string;
   file_type?: string;
   size?: number;
+  uploaded_by?: string | User;
+  uploaded_at?: string;
+  storage_key?: string;
+  preview_url?: string;
 }
 
 export interface Subtask {
   _id?: string;
   id: string;
   title: string;
+  text?: string;
   is_completed?: boolean;
+  isDone?: boolean;
   done?: boolean;
+}
+
+export interface TaskDependency {
+  _id?: string;
+  id?: string;
+  title: string;
+  status: TaskStatus;
+  due_date?: string;
 }
 
 export interface ExecutionResult {
@@ -32,6 +46,18 @@ export interface ExecutionResult {
   submitted_at?: string;
   review_status?: ReviewStatus;
   feedback?: string;
+  reject_reason?: string;
+  reviewed_at?: string;
+  reviewed_by?: string;
+}
+
+export interface TaskKpiResult {
+  score?: number;
+  difficulty_weight?: number;
+  timeliness_bonus?: number;
+  days_delta?: number;
+  completed_early?: boolean;
+  calculated_at?: string;
 }
 
 export interface Task {
@@ -42,8 +68,13 @@ export interface Task {
   description?: string;
   status: TaskStatus;
   priority: TaskPriority;
+  group_key?: string;
+  group_name?: string;
+  kpi_weight?: number;
   start_date?: string;
   due_date?: string;
+  actualStartDate?: string;
+  actualFinishDate?: string;
   attachment_count?: number;
   attachments?: Attachment[];
   subtasks?: Subtask[];
@@ -55,7 +86,10 @@ export interface Task {
   reviewer?: User;
   created_by?: string;
   createdBy?: User;
+  dependency_ids?: Array<string | TaskDependency>;
+  dependencies?: TaskDependency[];
   execution_result?: ExecutionResult;
+  kpi_result?: TaskKpiResult;
   createdAt?: string;
   updatedAt?: string;
 }

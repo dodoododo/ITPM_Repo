@@ -1,5 +1,5 @@
 import { API_ENDPOINTS, getApiUrl } from '@/config/api';
-import type { ApiResponse, PaginatedResponse, Project, ProjectStatus } from '@/types';
+import type { ApiResponse, PaginatedResponse, Project, ProjectStatus, ProjectVisibility } from '@/types';
 
 export interface ProjectListParams {
   status?: ProjectStatus | 'all';
@@ -13,6 +13,7 @@ export interface ProjectPayload {
   description?: string;
   color?: string;
   status?: ProjectStatus;
+  visibility?: ProjectVisibility;
   progress?: number;
   start_date?: string;
   end_date?: string;

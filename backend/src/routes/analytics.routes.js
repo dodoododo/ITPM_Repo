@@ -1,7 +1,12 @@
 const express = require("express");
 const mongoose = require("mongoose");
-const { Task, Project } = require("../models");
+const { Task, Project, Department } = require("../models");
 const { verifyToken } = require("../middleware/auth.middleware");
+const {
+  canAccessTaskContent,
+  getUserDepartmentIds,
+  isManager,
+} = require("../utils/rbac");
 
 const router = express.Router();
 
@@ -19,26 +24,62 @@ const getDateFilter = (range) => {
   return start;
 };
 
-const buildMatch = (query) => {
+const createHttpError = (message, statusCode) => {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+};
+
+const buildTaskProjectScopeFilter = async (user) => {
+  const scope = [
+    { owner_id: user.userId },
+    { member_ids: user.userId },
+  ];
+
+  if (isManager(user)) {
+    const departmentIds = await getUserDepartmentIds(Department, user.userId);
+    scope.push({ department_id: { $in: departmentIds } });
+  }
+
+  return { $or: scope };
+};
+
+const getScopedProjectIds = async (user, projectId) => {
+  if (projectId && projectId !== "all") {
+    if (!mongoose.Types.ObjectId.isValid(projectId)) {
+      throw createHttpError("Invalid projectId", 400);
+    }
+
+    const project = await Project.findById(projectId);
+    if (!project) {
+      throw createHttpError("Project not found", 404);
+    }
+
+    const allowed = await canAccessTaskContent(user, project, Department);
+    if (!allowed) {
+      throw createHttpError("You do not have access to this project's analytics.", 403);
+    }
+
+    return [new mongoose.Types.ObjectId(projectId)];
+  }
+
+  const projects = await Project.find(await buildTaskProjectScopeFilter(user)).select("_id").lean();
+  return projects.map((project) => project._id);
+};
+
+const buildMatch = async (query, user) => {
   const match = {};
   const startDate = getDateFilter(query.range || "month");
 
   match.createdAt = { $gte: startDate };
-
-  if (query.projectId && query.projectId !== "all") {
-    if (!mongoose.Types.ObjectId.isValid(query.projectId)) {
-      throw new Error("Invalid projectId");
-    }
-
-    match.project_id = new mongoose.Types.ObjectId(query.projectId);
-  }
+  match.project_id = { $in: await getScopedProjectIds(user, query.projectId) };
 
   return match;
 };
 
 router.get("/summary", verifyToken, async (req, res) => {
   try {
-    const match = buildMatch(req.query);
+    const match = await buildMatch(req.query, req.user);
     const now = new Date();
 
     const [summary] = await Task.aggregate([
@@ -50,6 +91,7 @@ router.get("/summary", verifyToken, async (req, res) => {
           done: { $sum: { $cond: [{ $eq: ["$status", "done"] }, 1, 0] } },
           in_progress: { $sum: { $cond: [{ $eq: ["$status", "in_progress"] }, 1, 0] } },
           review: { $sum: { $cond: [{ $eq: ["$status", "review"] }, 1, 0] } },
+          needs_revision: { $sum: { $cond: [{ $eq: ["$status", "needs_revision"] }, 1, 0] } },
           todo: { $sum: { $cond: [{ $eq: ["$status", "todo"] }, 1, 0] } },
           overdue: {
             $sum: {
@@ -75,6 +117,7 @@ router.get("/summary", verifyToken, async (req, res) => {
           done: 1,
           in_progress: 1,
           review: 1,
+          needs_revision: 1,
           todo: 1,
           overdue: 1,
           kpi: {
@@ -95,19 +138,20 @@ router.get("/summary", verifyToken, async (req, res) => {
         done: 0,
         in_progress: 0,
         review: 0,
+        needs_revision: 0,
         todo: 0,
         overdue: 0,
         kpi: 0,
       },
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
 });
 
 router.get("/performance", verifyToken, async (req, res) => {
   try {
-    const match = buildMatch(req.query);
+    const match = await buildMatch(req.query, req.user);
 
     const data = await Task.aggregate([
       { $match: { ...match, assignee_id: { $ne: null } } },
@@ -150,13 +194,14 @@ router.get("/performance", verifyToken, async (req, res) => {
 
     res.json({ success: true, data });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
 });
 
-router.get("/projects", verifyToken, async (_req, res) => {
+router.get("/projects", verifyToken, async (req, res) => {
   try {
-    const projects = await Project.find().select("name color status").sort({ createdAt: -1 });
+    const filter = await buildTaskProjectScopeFilter(req.user);
+    const projects = await Project.find(filter).select("name color status visibility").sort({ createdAt: -1 });
     res.json({ success: true, data: projects });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

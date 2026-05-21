@@ -8,12 +8,12 @@
   :root {
     --font-inter: 'Inter', sans-serif;
     --background: 220 14% 96%;
-    --foreground: 220 13% 13%;
+    --foreground: 216 28% 15%;
     --card: 0 0% 100%;
     --card-foreground: 220 13% 13%;
     --popover: 0 0% 100%;
     --popover-foreground: 220 13% 13%;
-    --primary: 224 76% 48%;
+    --primary: 158 80% 43%;
     --primary-foreground: 0 0% 100%;
     --secondary: 220 14% 96%;
     --secondary-foreground: 220 13% 13%;
@@ -25,21 +25,21 @@
     --destructive-foreground: 0 0% 100%;
     --border: 220 13% 91%;
     --input: 220 13% 91%;
-    --ring: 224 76% 48%;
-    --chart-1: 224 76% 48%;
-    --chart-2: 160 60% 45%;
+    --ring: 158 80% 43%;
+    --chart-1: 158 80% 43%;
+    --chart-2: 212 88% 52%;
     --chart-3: 38 92% 50%;
     --chart-4: 0 72% 51%;
     --chart-5: 262 52% 47%;
     --radius: 0.625rem;
-    --sidebar-background: 0 0% 100%;
-    --sidebar-foreground: 220 13% 13%;
-    --sidebar-primary: 224 76% 48%;
+    --sidebar-background: 214 24% 16%;
+    --sidebar-foreground: 210 20% 92%;
+    --sidebar-primary: 158 80% 43%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 220 14% 96%;
-    --sidebar-accent-foreground: 220 13% 13%;
-    --sidebar-border: 220 13% 91%;
-    --sidebar-ring: 224 76% 48%;
+    --sidebar-accent: 213 22% 22%;
+    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-border: 214 18% 24%;
+    --sidebar-ring: 158 80% 43%;
     --success: 160 60% 45%;
     --success-foreground: 0 0% 100%;
     --warning: 38 92% 50%;
@@ -91,7 +91,29 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground font-inter;
+    @apply bg-[#f3f4f6] text-foreground font-inter antialiased;
+  }
+}
+
+@layer components {
+  .enterprise-panel {
+    @apply rounded-lg border border-slate-200 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)];
+  }
+
+  .enterprise-section-title {
+    @apply text-[11px] font-bold uppercase tracking-[0.12em] text-slate-500;
+  }
+
+  .enterprise-input {
+    @apply h-9 rounded-md border-slate-200 bg-white text-[13px] shadow-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100;
+  }
+
+  .enterprise-tab {
+    @apply relative flex h-12 items-center gap-1.5 px-1 text-[13px] font-semibold text-slate-500 transition-colors hover:text-slate-900;
+  }
+
+  .enterprise-tab-active {
+    @apply text-emerald-600 after:absolute after:bottom-0 after:left-0 after:h-0.5 after:w-full after:bg-emerald-500;
   }
 }
 

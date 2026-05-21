@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AlertCircle, Pencil, Plus, Search, Trash2, Users } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
-import { departmentService } from '@/services/departmentService';
+import { departmentService, type DepartmentPayload } from '@/services/departmentService';
 import { userService } from '@/services/userService';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import type { Department, User } from '@/types';
 
 const getUserId = (user: User | string) => (typeof user === 'string' ? user : user._id || user.id || '');
@@ -19,6 +20,22 @@ const normalizeDepartment = (department: Department): Department => ({
   member_count: department.member_count ?? department.member_ids?.length ?? 0,
 });
 
+const getManagerId = (department: Department) => {
+  const manager = department.manager_id || department.managerId;
+  return typeof manager === 'string' ? manager : manager?._id || manager?.id || '';
+};
+
+const getManagerName = (department: Department, users: User[]) => {
+  const manager = department.manager_id || department.managerId;
+  if (typeof manager === 'object') return manager.full_name || manager.email;
+
+  const managerId = getManagerId(department);
+  const user = users.find((item) => getUserId(item) === managerId);
+  return user?.full_name || user?.email || 'Chua gan';
+};
+
+const isManagerOption = (user: User) => user.role === 'admin' || user.role === 'manager';
+
 export const DepartmentsPage = () => {
   const { token } = useAuth();
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -29,12 +46,15 @@ export const DepartmentsPage = () => {
   const [showDepartmentDialog, setShowDepartmentDialog] = useState(false);
   const [editingDepartment, setEditingDepartment] = useState<Department | null>(null);
   const [departmentName, setDepartmentName] = useState('');
+  const [departmentCode, setDepartmentCode] = useState('');
   const [departmentDescription, setDepartmentDescription] = useState('');
   const [departmentColor, setDepartmentColor] = useState('#2563EB');
+  const [departmentManagerId, setDepartmentManagerId] = useState('');
 
   const [memberDepartment, setMemberDepartment] = useState<Department | null>(null);
   const [memberSearch, setMemberSearch] = useState('');
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
+  const managerOptions = useMemo(() => users.filter(isManagerOption), [users]);
 
   useEffect(() => {
     void loadData();
@@ -63,26 +83,32 @@ export const DepartmentsPage = () => {
   const openCreateDialog = () => {
     setEditingDepartment(null);
     setDepartmentName('');
+    setDepartmentCode('');
     setDepartmentDescription('');
     setDepartmentColor('#2563EB');
+    setDepartmentManagerId('');
     setShowDepartmentDialog(true);
   };
 
   const openEditDialog = (department: Department) => {
     setEditingDepartment(department);
     setDepartmentName(department.name);
+    setDepartmentCode(department.code || '');
     setDepartmentDescription(department.description || '');
     setDepartmentColor(department.color || '#2563EB');
+    setDepartmentManagerId(getManagerId(department));
     setShowDepartmentDialog(true);
   };
 
   const handleSaveDepartment = async () => {
-    if (!departmentName.trim() || !token) return;
+    if (!departmentName.trim() || !departmentCode.trim() || !departmentManagerId || !token) return;
 
     try {
       setError('');
-      const payload = {
+      const payload: DepartmentPayload = {
         name: departmentName.trim(),
+        code: departmentCode.trim().toUpperCase(),
+        managerId: departmentManagerId,
         description: departmentDescription.trim(),
         color: departmentColor,
       };
@@ -234,6 +260,9 @@ export const DepartmentsPage = () => {
                       <div className="w-4 h-4 rounded-full flex-shrink-0" style={{ backgroundColor: department.color }} />
                       <CardTitle className="text-lg truncate">{department.name}</CardTitle>
                     </div>
+                    <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      {department.code || 'NO-CODE'}
+                    </p>
                     {department.description && (
                       <CardDescription className="mt-2 line-clamp-2">{department.description}</CardDescription>
                     )}
@@ -255,6 +284,11 @@ export const DepartmentsPage = () => {
               </CardHeader>
 
               <CardContent className="space-y-4">
+                <div className="text-sm">
+                  <p className="text-xs font-medium text-gray-500">Manager</p>
+                  <p className="truncate font-medium text-gray-800">{getManagerName(department, users)}</p>
+                </div>
+
                 <div className="flex items-center gap-2 text-sm">
                   <Users className="w-4 h-4 text-gray-600" />
                   <span className="text-gray-700">{department.member_count || 0} thanh vien</span>
@@ -283,6 +317,31 @@ export const DepartmentsPage = () => {
               <Input value={departmentName} onChange={(event) => setDepartmentName(event.target.value)} />
             </div>
             <div>
+              <label className="block text-sm font-medium mb-1">Ma phong ban</label>
+              <Input
+                value={departmentCode}
+                onChange={(event) => setDepartmentCode(event.target.value.toUpperCase())}
+                placeholder="VD: ENG, MKT, HR"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Manager</label>
+              <Select value={departmentManagerId} onValueChange={setDepartmentManagerId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Chon manager" />
+                </SelectTrigger>
+                <SelectContent>
+                  {managerOptions.length === 0 ? (
+                    <SelectItem value="none" disabled>Chua co manager</SelectItem>
+                  ) : managerOptions.map((user) => (
+                    <SelectItem key={getUserId(user)} value={getUserId(user)}>
+                      {user.full_name || user.email}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
               <label className="block text-sm font-medium mb-1">Mo ta</label>
               <Input value={departmentDescription} onChange={(event) => setDepartmentDescription(event.target.value)} />
             </div>
@@ -300,7 +359,7 @@ export const DepartmentsPage = () => {
             </div>
             <div className="flex gap-2 justify-end">
               <Button variant="outline" onClick={() => setShowDepartmentDialog(false)}>Huy</Button>
-              <Button onClick={handleSaveDepartment} disabled={!departmentName.trim()}>
+              <Button onClick={handleSaveDepartment} disabled={!departmentName.trim() || !departmentCode.trim() || !departmentManagerId}>
                 {editingDepartment ? 'Luu thay doi' : 'Tao phong ban'}
               </Button>
             </div>
@@ -324,22 +383,29 @@ export const DepartmentsPage = () => {
               <div className="border rounded-lg divide-y max-h-80 overflow-auto">
                 {memberUsers.length === 0 ? (
                   <div className="p-4 text-sm text-gray-500">Chua co thanh vien.</div>
-                ) : memberUsers.map((user) => (
-                  <div key={getUserId(user)} className="flex items-center justify-between gap-3 p-3">
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium truncate">{user.full_name}</p>
-                      <p className="text-xs text-gray-500 truncate">{user.email}</p>
+                ) : memberUsers.map((user) => {
+                  const userId = getUserId(user);
+                  const isDepartmentManager = memberDepartment ? getManagerId(memberDepartment) === userId : false;
+                  return (
+                    <div key={userId} className="flex items-center justify-between gap-3 p-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium truncate">{user.full_name}</p>
+                        <p className="text-xs text-gray-500 truncate">
+                          {user.email}{isDepartmentManager ? ' - Manager' : ''}
+                        </p>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        disabled={isDepartmentManager}
+                        onClick={() => handleRemoveMember(userId)}
+                        className="text-red-600 hover:text-red-700 hover:bg-red-50 disabled:opacity-40"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => handleRemoveMember(getUserId(user))}
-                      className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
 

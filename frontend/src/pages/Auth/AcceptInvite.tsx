@@ -43,11 +43,11 @@ export const AcceptInvitePage: React.FC = () => {
       return;
     }
 
-    if (!password || password.length < 6) {
-      setError('Mật khẩu phải có ít nhất 6 ký tự');
+    const passwordError = !password || password.length < 8 || !/[A-Z]/.test(password) || !/[0-9]/.test(password);
+    if (passwordError) {
+      setError('Password must be at least 8 characters and include 1 uppercase letter and 1 number');
       return;
     }
-
     if (password !== confirmPassword) {
       setError('Mật khẩu xác nhận không khớp');
       return;
@@ -67,7 +67,7 @@ export const AcceptInvitePage: React.FC = () => {
         password,
       });
 
-      if (response.success && response.data) {
+      if (response.success && response.data?.token) {
         const { user, token: newToken } = response.data;
         setAuthData(user, newToken);
         setSuccess('Tài khoản đã được tạo thành công!');

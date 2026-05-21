@@ -6,8 +6,10 @@ const path = require("path");
 const connectDB = require("./config/db");
 const apiRoutes = require("./routes");
 const { initSocket } = require("./utils/socket");
+const { startDeadlineNotifier } = require("./utils/deadlineNotifier");
 
 const app = express();
+const uploadRoot = path.resolve(process.env.FILE_STORAGE_PATH || path.join(__dirname, "..", "uploads"));
 const configuredOrigins = process.env.CORS_ORIGIN
   ? process.env.CORS_ORIGIN.split(",").map((origin) => origin.trim()).filter(Boolean)
   : [];
@@ -19,7 +21,7 @@ const corsOrigin = [...new Set([
 
 // middleware
 app.use(express.json());
-app.use("/uploads", express.static(path.join(__dirname, "..", "uploads")));
+app.use("/uploads", express.static(uploadRoot));
 app.use(cors({
   origin: corsOrigin,
   credentials: true,
@@ -48,5 +50,6 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 5000;
 const server = http.createServer(app);
 initSocket(server, corsOrigin);
+startDeadlineNotifier();
 
 server.listen(PORT, () => console.log("Server running on port " + PORT));

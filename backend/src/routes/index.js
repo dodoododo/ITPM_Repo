@@ -9,6 +9,7 @@ const taskRoutes = require("./task.routes");
 const uploadRoutes = require("./upload.routes");
 const analyticsRoutes = require("./analytics.routes");
 const notificationRoutes = require("./notification.routes");
+const auditRoutes = require("./audit.routes");
 
 const router = express.Router();
 
@@ -28,5 +29,6 @@ router.use("/tasks", taskRoutes);
 router.use("/upload", uploadRoutes);
 router.use("/analytics", analyticsRoutes);
 router.use("/notifications", notificationRoutes);
+router.use("/audit-logs", auditRoutes);
 
 module.exports = router;

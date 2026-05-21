@@ -11,14 +11,14 @@ export default function AppLayout() {
   const [showCreate, setShowCreate] = useState(false);
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-[#f3f4f6]">
       <Sidebar />
       <TopHeader onCreateNew={() => setShowCreate(true)} />
       <main className={cn(
-        "pt-16 min-h-screen transition-all duration-300",
-        sidebarCollapsed ? "pl-[68px]" : "pl-[240px]"
+        "pt-[61px] min-h-screen transition-all duration-300",
+        sidebarCollapsed ? "pl-[72px]" : "pl-[256px]"
       )}>
-        <div className="p-6">
+        <div className="p-5">
           <Outlet />
         </div>
       </main>

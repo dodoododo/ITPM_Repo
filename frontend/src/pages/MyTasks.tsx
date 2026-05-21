@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { CheckCircle2, ChevronDown, ChevronRight, Circle, Clock, Filter, Loader2, Plus, Search } from 'lucide-react';
+import { CheckCircle2, ChevronDown, ChevronRight, Circle, Clock, Loader2, Plus, Search } from 'lucide-react';
 import { useAuth } from '@/lib/AuthContext';
 import { projectService } from '@/services/projectService';
 import { taskService } from '@/services/taskService';
@@ -17,7 +17,8 @@ import { type Project, type Task, type TaskStatus, type User } from '@/types';
 const STATUS_CONFIG: Record<TaskStatus, { label: string; classes: string }> = {
   todo: { label: 'Todo', classes: 'bg-slate-100 text-slate-600 border-slate-200' },
   in_progress: { label: 'In Progress', classes: 'bg-amber-50 text-amber-600 border-amber-200' },
-  review: { label: 'Review', classes: 'bg-blue-50 text-blue-600 border-blue-200' },
+  review: { label: 'Pending Review', classes: 'bg-blue-50 text-blue-600 border-blue-200' },
+  needs_revision: { label: 'Needs Revision', classes: 'bg-red-50 text-red-600 border-red-200' },
   done: { label: 'Done', classes: 'bg-emerald-50 text-emerald-600 border-emerald-200' },
 };
 
@@ -38,6 +39,7 @@ export default function MyTasks() {
   const [error, setError] = useState('');
 
   const userId = user?._id || user?.id || '';
+  const canCreateTask = user?.role === 'admin' || user?.role === 'manager';
 
   useEffect(() => {
     void loadData();
@@ -49,10 +51,11 @@ export default function MyTasks() {
     try {
       setIsLoading(true);
       setError('');
+      const canLoadUsers = user?.role === 'admin' || user?.role === 'manager';
       const [taskList, projectResponse, userResponse] = await Promise.all([
         taskService.getTasks(token, { assigneeId: userId, status: statusFilter, limit: 200 }),
         projectService.getProjects(token, { page: 1, limit: 100 }),
-        userService.getUsers(token),
+        canLoadUsers ? userService.getUsers(token) : Promise.resolve({ success: true, data: user ? [user] : [] }),
       ]);
 
       setTasks(taskList);
@@ -121,10 +124,12 @@ export default function MyTasks() {
       <div className="border-b border-slate-200 bg-white sticky top-0 z-10 px-6 pt-6">
         <div className="flex items-center justify-between mb-4">
           <h1 className="text-[22px] font-semibold text-slate-900 tracking-tight">Viec cua toi</h1>
-          <Button size="sm" onClick={() => setShowCreate(true)} className="h-8 text-xs font-medium bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5">
-            <Plus className="w-3.5 h-3.5" />
-            Tao cong viec
-          </Button>
+          {canCreateTask && (
+            <Button size="sm" onClick={() => setShowCreate(true)} className="h-8 text-xs font-medium bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5">
+              <Plus className="w-3.5 h-3.5" />
+              Tao cong viec
+            </Button>
+          )}
         </div>
 
         <div className="flex gap-6">
@@ -132,7 +137,8 @@ export default function MyTasks() {
             { id: 'all', label: 'Tat ca' },
             { id: 'todo', label: 'Todo' },
             { id: 'in_progress', label: 'In Progress' },
-            { id: 'review', label: 'Review' },
+            { id: 'review', label: 'Pending Review' },
+            { id: 'needs_revision', label: 'Needs Revision' },
             { id: 'done', label: 'Done' },
           ].map((tab) => (
             <button
@@ -161,10 +167,6 @@ export default function MyTasks() {
               className="h-8 pl-9 text-[13px] bg-white border-slate-300 focus-visible:ring-emerald-500"
             />
           </div>
-          <Button variant="outline" size="sm" className="h-8 text-[13px] font-medium border-slate-300 gap-2 bg-white">
-            <Filter className="w-3.5 h-3.5 text-slate-400" />
-            Loc
-          </Button>
         </div>
 
         <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as TaskStatus | 'all')}>
@@ -175,7 +177,8 @@ export default function MyTasks() {
             <SelectItem value="all">Tat ca trang thai</SelectItem>
             <SelectItem value="todo">Todo</SelectItem>
             <SelectItem value="in_progress">In Progress</SelectItem>
-            <SelectItem value="review">Review</SelectItem>
+            <SelectItem value="review">Pending Review</SelectItem>
+            <SelectItem value="needs_revision">Needs Revision</SelectItem>
             <SelectItem value="done">Done</SelectItem>
           </SelectContent>
         </Select>

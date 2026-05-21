@@ -6,7 +6,7 @@
 import type { User } from './user.types';
 import type { Attachment } from './task.types';
 
-export type NotificationType = 'task_assigned' | 'task_comment' | 'review_requested' | 'review_approved' | 'review_rejected' | 'mention' | 'system';
+export type NotificationType = 'task_assigned' | 'task_comment' | 'review_requested' | 'review_approved' | 'review_rejected' | 'deadline_due' | 'deadline_overdue' | 'mention' | 'system';
 
 export interface Comment {
   _id?: string;
@@ -17,6 +17,7 @@ export interface Comment {
   text: string;
   attachments?: Attachment[];
   mentions?: Array<string | User>;
+  client_request_id?: string;
   createdAt?: string;
   updatedAt?: string;
 }

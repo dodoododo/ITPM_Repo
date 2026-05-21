@@ -6,6 +6,22 @@
 import { API_ENDPOINTS, getApiUrl } from '@/config/api';
 import type { Department, ApiResponse } from '@/types';
 
+export interface DepartmentPayload {
+  name: string;
+  code: string;
+  managerId: string;
+  description?: string;
+  color?: string;
+}
+
+const readJson = async <T>(response: Response): Promise<T> => {
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload.message || response.statusText);
+  }
+  return payload;
+};
+
 export const departmentService = {
   /**
    * Lấy danh sách tất cả phòng ban
@@ -17,11 +33,7 @@ export const departmentService = {
       },
     });
 
-    if (!response.ok) {
-      throw new Error(`Get departments failed: ${response.statusText}`);
-    }
-
-    return response.json();
+    return readJson<ApiResponse<Department[]>>(response);
   },
 
   /**
@@ -34,18 +46,14 @@ export const departmentService = {
       },
     });
 
-    if (!response.ok) {
-      throw new Error(`Get department failed: ${response.statusText}`);
-    }
-
-    return response.json();
+    return readJson<ApiResponse<Department>>(response);
   },
 
   /**
    * Tạo phòng ban mới
    */
   createDepartment: async (
-    data: { name: string; description?: string; color?: string },
+    data: DepartmentPayload,
     token: string
   ): Promise<ApiResponse<Department>> => {
     const response = await fetch(getApiUrl(API_ENDPOINTS.DEPARTMENTS.CREATE), {
@@ -57,11 +65,7 @@ export const departmentService = {
       body: JSON.stringify(data),
     });
 
-    if (!response.ok) {
-      throw new Error(`Create department failed: ${response.statusText}`);
-    }
-
-    return response.json();
+    return readJson<ApiResponse<Department>>(response);
   },
 
   /**
@@ -69,7 +73,7 @@ export const departmentService = {
    */
   updateDepartment: async (
     id: string,
-    data: { name?: string; description?: string; color?: string },
+    data: Partial<DepartmentPayload>,
     token: string
   ): Promise<ApiResponse<Department>> => {
     const response = await fetch(getApiUrl(API_ENDPOINTS.DEPARTMENTS.UPDATE(id)), {
@@ -81,11 +85,7 @@ export const departmentService = {
       body: JSON.stringify(data),
     });
 
-    if (!response.ok) {
-      throw new Error(`Update department failed: ${response.statusText}`);
-    }
-
-    return response.json();
+    return readJson<ApiResponse<Department>>(response);
   },
 
   /**
@@ -108,11 +108,7 @@ export const departmentService = {
       }
     );
 
-    if (!response.ok) {
-      throw new Error(`Add members failed: ${response.statusText}`);
-    }
-
-    return response.json();
+    return readJson<ApiResponse<Department>>(response);
   },
 
   /**
@@ -133,11 +129,7 @@ export const departmentService = {
       }
     );
 
-    if (!response.ok) {
-      throw new Error(`Remove member failed: ${response.statusText}`);
-    }
-
-    return response.json();
+    return readJson<ApiResponse<Department>>(response);
   },
 
   /**
@@ -151,10 +143,6 @@ export const departmentService = {
       },
     });
 
-    if (!response.ok) {
-      throw new Error(`Delete department failed: ${response.statusText}`);
-    }
-
-    return response.json();
+    return readJson<ApiResponse<null>>(response);
   },
 };

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { AlertCircle, BarChart3, CheckCircle2, LayoutGrid, List, Loader2, Plus, Settings, Trash2, UserPlus, Users } from 'lucide-react';
+import { AlertCircle, BarChart3, CalendarDays, CheckCircle2, Filter, LayoutGrid, List, Loader2, Plus, Search, Settings, Trash2, UserPlus, Users } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { departmentService } from '@/services/departmentService';
 import { projectService } from '@/services/projectService';
@@ -49,7 +49,7 @@ const getProjectOwner = (project: Project | null, users: User[]) => {
 export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const projectId = id || '';
   const taskIdFromQuery = searchParams.get('task') || '';
 
@@ -58,6 +58,9 @@ export default function ProjectDetail() {
   const [users, setUsers] = useState<User[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [view, setView] = useState<'kanban' | 'list' | 'gantt'>('kanban');
+  const [taskSearch, setTaskSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | Task['status']>('all');
+  const [assigneeFilter, setAssigneeFilter] = useState('all');
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   const [showCreateTask, setShowCreateTask] = useState(false);
@@ -66,10 +69,11 @@ export default function ProjectDetail() {
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
   const [selectedOwnerId, setSelectedOwnerId] = useState('');
   const [isSavingMembers, setIsSavingMembers] = useState(false);
+  const canManageProject = user?.role === 'admin' || user?.role === 'manager';
 
   useEffect(() => {
     void loadData();
-  }, [token, projectId]);
+  }, [token, projectId, user?.role]);
 
   useEffect(() => {
     const owner = getProjectOwner(project, users);
@@ -82,17 +86,31 @@ export default function ProjectDetail() {
     try {
       setIsLoading(true);
       setError('');
+      const canLoadUsers = user?.role === 'admin' || user?.role === 'manager';
+      let taskAccessMessage = '';
       const [projectResponse, projectTasks, userResponse, departmentResponse] = await Promise.all([
         projectService.getProject(projectId, token),
-        taskService.getProjectTasks(projectId, token),
-        userService.getUsers(token),
+        taskService.getProjectTasks(projectId, token).catch((err) => {
+          taskAccessMessage = err instanceof Error ? err.message : 'No task access';
+          return [];
+        }),
+        canLoadUsers ? userService.getUsers(token) : Promise.resolve({ success: true, data: [] }),
         departmentService.getDepartments(token),
       ]);
 
       setProject(projectResponse.data || null);
       setTasks(projectTasks);
-      setUsers(userResponse.data || []);
+      if (userResponse.data?.length) {
+        setUsers(userResponse.data);
+      } else {
+        const projectUsers = getProjectMembers(projectResponse.data || null, []);
+        const owner = getProjectOwner(projectResponse.data || null, projectUsers);
+        setUsers(owner && !projectUsers.some((item) => getEntityId(item) === getEntityId(owner))
+          ? [owner, ...projectUsers]
+          : projectUsers);
+      }
       setDepartments(departmentResponse.data || []);
+      if (taskAccessMessage) setError(taskAccessMessage);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load project');
     } finally {
@@ -104,6 +122,9 @@ export default function ProjectDetail() {
   const owner = useMemo(() => getProjectOwner(project, users), [project, users]);
   const ownerId = owner ? getEntityId(owner) : '';
   const memberIdSet = useMemo(() => new Set(memberUsers.map((member) => getEntityId(member))), [memberUsers]);
+  const currentUserId = user?._id || user?.id || '';
+  const isCurrentProjectMember = Boolean(currentUserId && (ownerId === currentUserId || memberIdSet.has(currentUserId)));
+  const canCreateTask = user?.role === 'manager' || user?.role === 'admin';
 
   const department = useMemo(() => {
     if (!project?.department_id) return null;
@@ -128,6 +149,20 @@ export default function ProjectDetail() {
     const percentage = total > 0 ? Math.round((done / total) * 100) : project?.progress || 0;
     return { done, total, percentage };
   }, [tasks, project]);
+
+  const filteredTasks = useMemo(() => {
+    const keyword = taskSearch.trim().toLowerCase();
+    return tasks.filter((task) => {
+      const assigneeId = getEntityId(task.assignee_id);
+      const matchesKeyword = !keyword
+        || task.title.toLowerCase().includes(keyword)
+        || (task.description || '').toLowerCase().includes(keyword)
+        || (task.content_html || '').toLowerCase().includes(keyword);
+      const matchesStatus = statusFilter === 'all' || task.status === statusFilter;
+      const matchesAssignee = assigneeFilter === 'all' || assigneeId === assigneeFilter;
+      return matchesKeyword && matchesStatus && matchesAssignee;
+    });
+  }, [tasks, taskSearch, statusFilter, assigneeFilter]);
 
   const blockingTaskCount = (userId: string) => tasks.filter((task) => (
     getEntityId(task.assignee_id) === userId && task.status === 'in_progress'
@@ -220,9 +255,10 @@ export default function ProjectDetail() {
   const statusCfg = STATUS_CONFIG[project.status] || STATUS_CONFIG.planning;
 
   return (
-    <div className="flex flex-col h-[calc(100vh-64px)] bg-white -mx-6 -mt-6">
-      <div className="bg-white px-6 pt-5 flex-shrink-0 z-10">
-        <div className="flex items-start justify-between gap-4 mb-4">
+    <div className="flex h-[calc(100vh-101px)] flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+      <div className="flex-shrink-0 bg-white">
+        <div className="px-5 pt-4">
+        <div className="mb-4 flex items-start justify-between gap-4">
           <div className="flex items-start gap-3 min-w-0">
             <div className="w-10 h-10 rounded-md flex items-center justify-center mt-0.5 shrink-0" style={{ backgroundColor: project.color || '#2563EB' }}>
               <span className="text-lg font-bold text-white">{project.name[0]}</span>
@@ -261,19 +297,27 @@ export default function ProjectDetail() {
                   </div>
                 )}
               </div>
-              <Button variant="ghost" size="icon" onClick={() => setShowMembers(true)} className="w-7 h-7 rounded-full bg-slate-50 hover:bg-slate-200 text-slate-500">
-                <UserPlus className="w-3.5 h-3.5" />
-              </Button>
+              {canManageProject && (
+                <Button variant="ghost" size="icon" onClick={() => setShowMembers(true)} className="w-7 h-7 rounded-full bg-slate-50 hover:bg-slate-200 text-slate-500">
+                  <UserPlus className="w-3.5 h-3.5" />
+                </Button>
+              )}
             </div>
 
-            <Button variant="outline" size="sm" onClick={() => setShowMembers(true)} className="h-8 text-[13px] font-medium border-slate-300 text-slate-700">
-              <Settings className="w-3.5 h-3.5 mr-1.5 text-slate-400" />
-              Thanh vien
-            </Button>
-            <Button size="sm" onClick={() => setShowCreateTask(true)} className="h-8 text-[13px] font-medium bg-emerald-600 hover:bg-emerald-700 text-white shadow-none">
-              <Plus className="w-3.5 h-3.5 mr-1.5" />
-              Giao viec moi
-            </Button>
+            {canManageProject && (
+              <>
+                <Button variant="outline" size="sm" onClick={() => setShowMembers(true)} className="h-8 text-[13px] font-medium border-slate-300 text-slate-700">
+                  <Settings className="w-3.5 h-3.5 mr-1.5 text-slate-400" />
+                  Thanh vien
+                </Button>
+                {canCreateTask && (
+                  <Button size="sm" onClick={() => setShowCreateTask(true)} className="h-8 text-[13px] font-medium bg-emerald-600 hover:bg-emerald-700 text-white shadow-none">
+                    <Plus className="w-3.5 h-3.5 mr-1.5" />
+                    Giao viec moi
+                  </Button>
+                )}
+              </>
+            )}
           </div>
         </div>
 
@@ -284,20 +328,39 @@ export default function ProjectDetail() {
           </div>
         )}
 
-        <div className="flex items-center gap-4 mb-4">
-          <div className="flex-1 max-w-sm flex items-center gap-3">
-            <div className="flex-1 bg-slate-100 rounded-full h-1.5 overflow-hidden">
-              <div className="h-full transition-all duration-1000 ease-in-out" style={{ width: `${stats.percentage}%`, backgroundColor: project.color || '#10b981' }} />
+        <div className="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+            <p className="text-[10px] font-extrabold uppercase tracking-wide text-slate-400">Tien do</p>
+            <div className="mt-2 flex items-center gap-3">
+              <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-200">
+                <div className="h-full transition-all duration-1000 ease-in-out" style={{ width: `${stats.percentage}%`, backgroundColor: project.color || '#10b981' }} />
+              </div>
+              <span className="text-[12px] font-extrabold text-slate-800">{stats.percentage}%</span>
             </div>
-            <span className="text-[12px] font-semibold text-slate-700 w-8">{stats.percentage}%</span>
           </div>
-          <div className="text-[12px] text-slate-500 flex items-center gap-1.5">
-            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-            Hoan thanh {stats.done}/{stats.total} cong viec
+          <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+            <p className="text-[10px] font-extrabold uppercase tracking-wide text-slate-400">Hoan thanh</p>
+            <p className="mt-1 flex items-center gap-1.5 text-[13px] font-bold text-slate-800">
+              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+              {stats.done}/{stats.total} cong viec
+            </p>
+          </div>
+          <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+            <p className="text-[10px] font-extrabold uppercase tracking-wide text-slate-400">Dang xem</p>
+            <p className="mt-1 text-[13px] font-bold text-slate-800">{filteredTasks.length} task</p>
+          </div>
+          <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+            <p className="text-[10px] font-extrabold uppercase tracking-wide text-slate-400">Deadline</p>
+            <p className="mt-1 flex items-center gap-1.5 text-[13px] font-bold text-slate-800">
+              <CalendarDays className="h-3.5 w-3.5 text-blue-500" />
+              {project.end_date ? new Date(project.end_date).toLocaleDateString('vi-VN') : 'Chua dat'}
+            </p>
           </div>
         </div>
+        </div>
 
-        <div className="flex gap-6 border-b border-slate-200">
+        <div className="flex items-center justify-between gap-4 border-t border-slate-100 px-5">
+          <div className="flex gap-6">
           {[
             { id: 'kanban', icon: LayoutGrid, label: 'Kanban Board' },
             { id: 'list', icon: List, label: 'Danh sach' },
@@ -316,23 +379,65 @@ export default function ProjectDetail() {
               {view === tab.id && <div className="absolute bottom-0 left-0 w-full h-[2px] bg-emerald-600" />}
             </button>
           ))}
+          </div>
+          <div className="hidden items-center gap-2 text-[11px] font-semibold text-slate-500 lg:flex">
+            <Filter className="h-3.5 w-3.5" />
+            {filteredTasks.length}/{tasks.length} task hien thi
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 bg-slate-50 px-5 py-3">
+          <div className="relative min-w-[240px] flex-1 max-w-md">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+            <Input
+              value={taskSearch}
+              onChange={(event) => setTaskSearch(event.target.value)}
+              placeholder="Tim cong viec..."
+              className="h-8 rounded-md border-slate-200 bg-white pl-8 text-[12px] font-medium shadow-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+            />
+          </div>
+          <select
+            value={statusFilter}
+            onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}
+            className="h-8 rounded-md border border-slate-200 bg-white px-2.5 text-[12px] font-semibold text-slate-600 outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+          >
+            <option value="all">Tat ca trang thai</option>
+            <option value="todo">Todo</option>
+            <option value="in_progress">In Progress</option>
+            <option value="review">Pending Review</option>
+            <option value="needs_revision">Needs Revision</option>
+            <option value="done">Done</option>
+          </select>
+          <select
+            value={assigneeFilter}
+            onChange={(event) => setAssigneeFilter(event.target.value)}
+            className="h-8 rounded-md border border-slate-200 bg-white px-2.5 text-[12px] font-semibold text-slate-600 outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+          >
+            <option value="all">Tat ca phu trach</option>
+            {(memberUsers.length ? memberUsers : users).map((member) => (
+              <option key={getEntityId(member)} value={getEntityId(member)}>
+                {member.full_name || member.email}
+              </option>
+            ))}
+          </select>
         </div>
       </div>
 
-      <div className="flex-1 bg-slate-50 overflow-auto">
-        <div className="h-full min-h-[480px] p-5">
+      <div className="flex-1 overflow-hidden bg-[#f3f4f6]">
+        <div className="h-full min-h-[480px] p-4">
           {view === 'kanban' && (
             <KanbanBoard
               projectId={projectId}
-              tasks={tasks}
+              tasks={filteredTasks}
               users={users}
               onTaskUpdated={handleTaskUpdated}
               initialTaskId={taskIdFromQuery}
               onTaskDetailClose={clearTaskQuery}
+              onCreateTask={() => setShowCreateTask(true)}
             />
           )}
-          {view === 'list' && <ListView projectId={projectId} tasks={tasks} users={users} />}
-          {view === 'gantt' && <GanttChart projectId={projectId} tasks={tasks} users={users} />}
+          {view === 'list' && <ListView projectId={projectId} tasks={filteredTasks} users={users} onTaskUpdated={handleTaskUpdated} />}
+          {view === 'gantt' && <GanttChart projectId={projectId} tasks={filteredTasks} users={users} onTaskUpdated={handleTaskUpdated} />}
         </div>
       </div>
 

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { AlertCircle, ChevronDown, Filter, FolderKanban, Loader2, Plus, Search } from 'lucide-react';
+import { AlertCircle, ChevronDown, FolderKanban, Loader2, Plus, Search } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { departmentService } from '@/services/departmentService';
 import { projectService, type ProjectPayload } from '@/services/projectService';
@@ -14,7 +14,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
-import type { Department, Project, ProjectStatus, Task, User } from '@/types';
+import type { Department, Project, ProjectStatus, ProjectVisibility, Task, User } from '@/types';
 
 const COLORS = ['#2563EB', '#7C3AED', '#059669', '#DC2626', '#D97706', '#0891B2'];
 
@@ -51,6 +51,7 @@ interface ProjectFormState {
   start_date: string;
   end_date: string;
   status: ProjectStatus;
+  visibility: ProjectVisibility;
 }
 
 const defaultForm: ProjectFormState = {
@@ -62,10 +63,11 @@ const defaultForm: ProjectFormState = {
   start_date: '',
   end_date: '',
   status: 'planning',
+  visibility: 'private',
 };
 
 export default function Projects() {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const [projects, setProjects] = useState<Project[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -78,10 +80,13 @@ export default function Projects() {
   const [departmentFilter, setDepartmentFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [form, setForm] = useState<ProjectFormState>(defaultForm);
+  const canCreateProject = user?.role === 'admin' || user?.role === 'manager';
+  const canChooseOwner = user?.role === 'admin';
+  const currentUserId = user ? getEntityId(user) : '';
 
   useEffect(() => {
     void loadData();
-  }, [token, statusFilter, departmentFilter]);
+  }, [token, statusFilter, departmentFilter, user?.role]);
 
   const loadData = async () => {
     if (!token) return;
@@ -89,10 +94,11 @@ export default function Projects() {
     try {
       setIsLoading(true);
       setError('');
+      const canLoadUsers = user?.role === 'admin' || user?.role === 'manager';
       const [projectResponse, departmentResponse, userResponse] = await Promise.all([
         projectService.getProjects(token, { status: statusFilter, department_id: departmentFilter, page: 1, limit: 50 }),
         departmentService.getDepartments(token),
-        userService.getUsers(token),
+        canLoadUsers ? userService.getUsers(token) : Promise.resolve({ success: true, data: [] }),
       ]);
 
       const projectList = projectResponse.data || [];
@@ -134,7 +140,7 @@ export default function Projects() {
   const openCreate = () => {
     setForm({
       ...defaultForm,
-      owner_id: users[0] ? getEntityId(users[0]) : '',
+      owner_id: canChooseOwner ? (users[0] ? getEntityId(users[0]) : '') : currentUserId,
     });
     setShowCreate(true);
   };
@@ -154,6 +160,7 @@ export default function Projects() {
         description: form.description.trim(),
         color: form.color,
         status: form.status,
+        visibility: form.visibility,
         department_id: form.department_id === 'none' ? undefined : form.department_id,
         owner_id: form.owner_id,
         member_ids: [form.owner_id],
@@ -183,10 +190,12 @@ export default function Projects() {
             <h1 className="text-[22px] font-semibold text-slate-900 tracking-tight">Danh sach du an</h1>
             <p className="text-[13px] text-slate-500 mt-1">Theo doi tien do, phong ban va thanh vien du an.</p>
           </div>
-          <Button size="sm" onClick={openCreate} className="h-8 text-[13px] font-medium bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5 shadow-none">
-            <Plus className="w-3.5 h-3.5" />
-            Them du an
-          </Button>
+          {canCreateProject && (
+            <Button size="sm" onClick={openCreate} className="h-8 text-[13px] font-medium bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5 shadow-none">
+              <Plus className="w-3.5 h-3.5" />
+              Them du an
+            </Button>
+          )}
         </div>
 
         <div className="flex gap-6">
@@ -222,10 +231,6 @@ export default function Projects() {
               className="h-8 pl-9 text-[13px] bg-white border-slate-300 focus-visible:ring-emerald-500"
             />
           </div>
-          <Button variant="outline" size="sm" className="h-8 text-[13px] font-medium border-slate-300 gap-2 bg-white text-slate-600">
-            <Filter className="w-3.5 h-3.5 text-slate-400" />
-            Loc
-          </Button>
         </div>
 
         <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
@@ -366,7 +371,7 @@ export default function Projects() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium mb-1">Chu nhiem</label>
-                <Select value={form.owner_id} onValueChange={(value) => setFormValue('owner_id', value)}>
+                <Select value={form.owner_id} onValueChange={(value) => setFormValue('owner_id', value)} disabled={!canChooseOwner}>
                   <SelectTrigger><SelectValue placeholder="Chon owner" /></SelectTrigger>
                   <SelectContent>
                     {users.map((user) => (
@@ -411,6 +416,17 @@ export default function Projects() {
                     <SelectItem value="active">Dang chay</SelectItem>
                     <SelectItem value="on_hold">Tam dung</SelectItem>
                     <SelectItem value="completed">Hoan thanh</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1">Quyen rieng tu</label>
+                <Select value={form.visibility} onValueChange={(value) => setFormValue('visibility', value as ProjectVisibility)}>
+                  <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="private">Private</SelectItem>
+                    <SelectItem value="public">Public</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

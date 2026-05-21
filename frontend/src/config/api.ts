@@ -16,6 +16,9 @@ export const API_ENDPOINTS = {
   // Authentication
   AUTH: {
     LOGIN: '/auth/login',
+    CHANGE_PASSWORD: '/auth/change-password',
+    FORGOT_PASSWORD: '/auth/forgot-password',
+    RESET_PASSWORD: '/auth/reset-password',
   },
   
   // Workspace & Invitations
@@ -28,9 +31,13 @@ export const API_ENDPOINTS = {
   // Users
   USERS: {
     LIST: '/users',
+    CREATE: '/users',
+    CONFIG_STATUS: '/users/admin/config-status',
     GET: (id: string) => `/users/${id}`,
     UPDATE_STATUS: (id: string) => `/users/${id}/status`,
     UPDATE: (id: string) => `/users/${id}`,
+    RESEND_INVITE: (id: string) => `/users/${id}/resend-invite`,
+    RESET_PASSWORD: (id: string) => `/users/${id}/reset-password`,
   },
   
   // Departments
@@ -67,6 +74,7 @@ export const API_ENDPOINTS = {
     SUBMIT: (taskId: string) => `/tasks/${taskId}/submit`,
     REVIEW: (taskId: string) => `/tasks/${taskId}/review`,
     STATUS: (taskId: string) => `/tasks/${taskId}/status`,
+    REASSIGN: (taskId: string) => `/tasks/${taskId}/reassign`,
     UPDATE: (taskId: string) => `/tasks/${taskId}`,
   },
 

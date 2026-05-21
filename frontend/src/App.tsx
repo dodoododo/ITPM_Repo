@@ -1,4 +1,5 @@
 import { QueryClientProvider } from '@tanstack/react-query';
+import type { ReactNode } from 'react';
 import { BrowserRouter as Router, Navigate, Route, Routes } from 'react-router-dom';
 import { Toaster } from '@/components/ui/toaster';
 import { QueryClientInstance } from '@/lib/query-client';
@@ -14,7 +15,10 @@ import DepartmentDetail from '@/pages/DepartmentDetail';
 import Settings from '@/pages/Settings';
 import MyTasks from '@/pages/MyTasks';
 import { LoginPage } from '@/pages/Auth/Login';
+import { ChangePasswordPage } from '@/pages/Auth/ChangePassword';
 import { AcceptInvitePage } from '@/pages/Auth/AcceptInvite';
+import { ForgotPasswordPage } from '@/pages/Auth/ForgotPassword';
+import { ResetPasswordPage } from '@/pages/Auth/ResetPassword';
 import { InvitationsPage } from '@/pages/Invitations';
 
 const FullscreenLoader = () => (
@@ -27,6 +31,14 @@ const FullscreenLoader = () => (
     </div>
   </div>
 );
+
+const RequireRole = ({ roles, children }: { roles: string[]; children: ReactNode }) => {
+  const { user } = useAuth();
+  if (!user?.role || !roles.includes(user.role)) {
+    return <Navigate to="/" replace />;
+  }
+  return <>{children}</>;
+};
 
 const AuthenticatedApp = () => {
   const { isLoadingAuth, isAuthenticated } = useAuth();
@@ -47,9 +59,9 @@ const AuthenticatedApp = () => {
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/projects" element={<Projects />} />
           <Route path="/projects/:id" element={<ProjectDetail />} />
-          <Route path="/invitations" element={<InvitationsPage />} />
-          <Route path="/departments" element={<Departments />} />
-          <Route path="/departments/:id" element={<DepartmentDetail />} />
+          <Route path="/invitations" element={<RequireRole roles={['admin']}><InvitationsPage /></RequireRole>} />
+          <Route path="/departments" element={<RequireRole roles={['admin']}><Departments /></RequireRole>} />
+          <Route path="/departments/:id" element={<RequireRole roles={['admin']}><DepartmentDetail /></RequireRole>} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/my-tasks" element={<MyTasks />} />
         </Route>
@@ -65,6 +77,9 @@ function App() {
         <Router>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
+            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+            <Route path="/reset-password" element={<ResetPasswordPage />} />
+            <Route path="/change-password" element={<ChangePasswordPage />} />
             <Route path="/accept-invite" element={<AcceptInvitePage />} />
             <Route path="/*" element={<AuthenticatedApp />} />
           </Routes>
